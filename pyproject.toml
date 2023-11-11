@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools", "wheel"]
+requires = ["setuptools", "setuptools_scm", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -40,8 +40,8 @@ dependencies = [
   "voila",
 ]
 
-[tool.setuptools.dynamic]
-version = { attr = "psinspect.__version__" }
+[tool.setuptools_scm]
+version_file = "psinspect/_version.py"
 
 [tool.setuptools.package-data]
 "*" = ["*.yaml", "*.bibtex"]
