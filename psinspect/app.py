@@ -16,15 +16,7 @@ from pspy import so_dict
 from voila.app import Voila
 
 import psinspect
-from psinspect._version import get_versions
-
-# This is to fix loading of mathjax that is not correctly done and make the application totally
-# bugging see https://github.com/microsoft/vscode-jupyter/issues/8131#issuecomment-1589961116
-display(
-    HTML(
-        '<script type="text/javascript" async src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-MML-AM_SVG"></script>'
-    )
-)
+from psinspect._version import version
 
 _psinspect_dict_file = "PSINSPECT_DICT_FILE"
 _psinspect_debug_flag = "PSINSPECT_DEBUG_FLAG"
@@ -78,6 +70,13 @@ class App:
     loaded: bool = False
 
     def initialize(self):
+        # This is to fix loading of mathjax that is not correctly done and make the application totally
+        # bugging see https://github.com/microsoft/vscode-jupyter/issues/8131#issuecomment-1589961116
+        display(
+            HTML(
+                '<script type="text/javascript" async src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-MML-AM_SVG"></script>'
+            )
+        )
         self.log = log.get_logger(
             debug=bool(os.getenv(_psinspect_debug_flag, False)),
             fmt="%(asctime)s - %(levelname)s: %(message)s",
@@ -362,7 +361,7 @@ def run(args=None):
     parser.add_argument(
         "-d", "--debug", help="Produce verbose debug output.", action="store_true", default=False
     )
-    parser.add_argument("--version", action="version", version=get_versions().get("version"))
+    parser.add_argument("--version", action="version", version=version)
     arguments = parser.parse_args(args)
 
     logging.basicConfig(
