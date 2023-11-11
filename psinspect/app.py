@@ -7,16 +7,15 @@ from itertools import product
 import ipywidgets as widgets
 import numpy as np
 import plotly.graph_objects as go
+import psinspect
 import seaborn as sns
 from ipyfilechooser import FileChooser
 from IPython.display import HTML, display
+from psinspect._version import version
 from pspipe import conventions as cvt
-from pspipe_utils import best_fits, log, pspipe_list
+from pspipe_utils import best_fits, log, misc, pspipe_list
 from pspy import so_dict
 from voila.app import Voila
-
-import psinspect
-from psinspect._version import version
 
 _psinspect_dict_file = "PSINSPECT_DICT_FILE"
 _psinspect_debug_flag = "PSINSPECT_DEBUG_FLAG"
@@ -69,7 +68,7 @@ class App:
 
     loaded: bool = False
 
-    def initialize(self):
+    def initialize(self, dict_file=None, debug=False):
         # This is to fix loading of mathjax that is not correctly done and make the application totally
         # bugging see https://github.com/microsoft/vscode-jupyter/issues/8131#issuecomment-1589961116
         display(
@@ -78,12 +77,15 @@ class App:
             )
         )
         self.log = log.get_logger(
-            debug=bool(os.getenv(_psinspect_debug_flag, False)),
+            debug=bool(os.getenv(_psinspect_debug_flag, debug)),
             fmt="%(asctime)s - %(levelname)s: %(message)s",
         )
         # To avoid red background
         # https://stackoverflow.com/questions/25360714/avoid-red-background-color-for-logging-output-in-ipython-notebook
         self.log.handlers[0].stream = sys.stdout
+
+        if dict_file:
+            os.environ[_psinspect_dict_file] = os.path.realpath(dict_file)
 
         # Initialize first the footer i.e. the dumper and then the loader since a dict file can be
         # passed as argument and then will need the dumper to work
@@ -112,7 +114,9 @@ class App:
 
         self._update_info()
         self._update_passbands()
+        self._update_beams()
         self._update_windows()
+        self._update_maps()
         self._update_best_fits()
 
         self.log.info("done")
@@ -177,6 +181,7 @@ class App:
         self.tab.children += (widget,)
         self.tab.set_title(len(self.tab.children) - 1, title)
 
+    @logger.capture()
     def _update_info(self):
         self.spectra = cvt.spectra
         self.lmax = d["lmax"]
@@ -187,6 +192,7 @@ class App:
         self.log.debug(f"survey list: {self.survey_list}")
         self.log.debug(f"cross list: {self.cross_list}")
 
+    @logger.capture()
     def _update_passbands(self):
         passbands = {}
         for survey in self.survey_list:
@@ -197,25 +203,78 @@ class App:
                     nu_ghz, pb = np.loadtxt(filename).T
             else:
                 nu_ghz, pb = np.array([freq_info["freq_tag"]]), np.array([1.0])
-            if nu_ghz:
-                passbands[survey] = Bunch(nu_ghz=nu_ghz, pb=pb)
-
-        if passbands:
-            layout = base_layout.copy()
-            layout.update(dict(xaxis_title="multipole $\ell$", yaxis_title=""))
-            fig = go.FigureWidget(layout=layout)
-            for survey, meta in passbands.items():
-                fig.add_scatter(
-                    name=survey,
-                    x=meta.nu_ghz,
-                    y=meta.pb,
-                    mode="lines",
+            if nu_ghz is not None:
+                passbands[survey] = Bunch(
+                    nu_ghz=nu_ghz, pb=pb, color=self.db["{0}x{0}".format(survey)].color
                 )
 
-            self._add_tab(fig, "Bandpass")
-        else:
+        if not passbands:
             self.log.debug("Passbands information unreachable")
 
+        layout = base_layout.copy()
+        layout.update(dict(xaxis_title="frequency [GHz]", yaxis_title="transmission"))
+        fig = go.FigureWidget(layout=layout)
+        for survey, meta in passbands.items():
+            fig.add_scatter(
+                name=survey,
+                x=meta.nu_ghz,
+                y=meta.pb,
+                mode="lines",
+                line=dict(color=meta.color),
+            )
+
+        self._add_tab(fig, "Bandpass")
+
+    @logger.capture()
+    def _update_beams(self):
+        beams = {}
+        for survey in self.survey_list:
+            ell, bl = misc.read_beams(d[f"beam_T_{survey}"], d[f"beam_pol_{survey}"])
+            idx = np.where((ell >= 2) & (ell < self.lmax))
+            beams[survey] = Bunch(
+                ell=ell, bl=bl, idx=idx, color=self.db["{0}x{0}".format(survey)].color
+            )
+
+        if not beams:
+            self.log.debug("Beams information unreachable")
+
+        base_widget = widgets.HBox(
+            [
+                surveys := widgets.SelectMultiple(
+                    description="Survey", options=self.survey_list, value=[self.survey_list[0]]
+                ),
+                modes := widgets.SelectMultiple(
+                    description="Mode",
+                    options=(mode_options := ["T", "E", "B"]),
+                    value=["T"],
+                ),
+            ]
+        )
+        layout = base_layout.copy()
+        layout.update(dict(xaxis_title="$\ell$", yaxis_title="normalized beam"))
+        fig = go.FigureWidget(layout=layout)
+
+        def _update(change=None):
+            fig.data = []
+            for survey, mode in product(surveys.value, modes.value):
+                self.log.debug(f"{survey} - {mode}")
+                beam = beams[survey]
+                fig.add_scatter(
+                    name=f"{survey} - {mode}",
+                    x=beam.ell[beam.idx],
+                    y=beam.bl[mode][idx],
+                    mode="lines",
+                    line=dict(color=beam.color),
+                    opacity=1 - mode_options.index(mode) / len(mode_options),
+                )
+
+        surveys.observe(_update, names="value")
+        modes.observe(_update, names="value")
+        _update()
+
+        self._add_tab(widgets.VBox([base_widget, fig]), "Beams")
+
+    @logger.capture()
     def _update_windows(self):
         if not (directory := directory_exists("windows")):
             self.log.debug("No windows directory")
@@ -258,16 +317,67 @@ class App:
         self._add_tab(widgets.VBox([base_widget, img_widgets]), "Window masks")
         self.log.info(f"Directory '{directory}' loaded")
 
+    @logger.capture()
+    def _update_maps(self):
+        if not (directory := directory_exists("plots/maps")):
+            self.log.debug("No plots/maps directory")
+            return
+
+        nbr_splits = {len(d[f"maps_{survey}"]) for survey in self.survey_list}
+        base_widget = widgets.HBox(
+            [
+                surveys := widgets.SelectMultiple(
+                    description="Survey", options=self.survey_list, value=[self.survey_list[0]]
+                ),
+                kinds := widgets.SelectMultiple(
+                    description="Type",
+                    options=(kind_options := ["split", "windowed_split", "no_filter_split"]),
+                    value=["split"],
+                ),
+                modes := widgets.SelectMultiple(
+                    description="Mode",
+                    options=(mode_options := ["T", "Q", "U"]),
+                    value=["T"],
+                ),
+                splits := widgets.RadioButtons(
+                    description="Split",
+                    options=(split_options := range(max(nbr_splits))),
+                ),
+            ]
+        )
+
+        img_widgets = widgets.VBox()
+        png_files = {
+            p: os.path.join(directory, "{}_{}_{}_{}.png".format(*p))
+            for p in product(kind_options, self.survey_list, split_options, mode_options)
+        }
+
+        def _update(change=None):
+            img_widgets.children = []
+            for kind, survey, mode in product(kinds.value, surveys.value, modes.value):
+                if not os.path.exists(filename := png_files[kind, survey, splits.value, mode]):
+                    self.log.debug(f"{filename} does not exist")
+                    continue
+                with open(filename, "rb") as img:
+                    img_widgets.children += (
+                        widgets.HTML(f"<h2>{kind} - {survey} - split {splits.value} - {mode}</h2>"),
+                        widgets.Image(value=img.read(), format="png", width="auto", height=400),
+                    )
+
+        surveys.observe(_update, names="value")
+        kinds.observe(_update, names="value")
+        splits.observe(_update, names="value")
+        modes.observe(_update, names="value")
+        _update()
+
+        self._add_tab(widgets.VBox([base_widget, img_widgets]), "Maps")
+        self.log.info(f"Directory '{directory}' loaded")
+
+    @logger.capture()
     def _update_best_fits(self):
         if not (directory := directory_exists("best_fits")):
             self.log.debug("No best fits directory")
             return
-
-        layout = base_layout.copy()
-        layout.update(
-            dict(xaxis_title="multipole $\ell$", yaxis_title=r"$D_\ell\;[\mu\mathrm{K}^2]$")
-        )
-        fig = go.FigureWidget(layout=layout)
 
         for name in self.cross_list:
             ell, cmb_and_fg_dict = best_fits.cmb_dict_from_file(
@@ -276,6 +386,10 @@ class App:
                 spectra=self.spectra,
             )
             self.db[name].update(ell=ell, cmb_and_fg=cmb_and_fg_dict)
+
+        layout = base_layout.copy()
+        layout.update(dict(xaxis_title="$\ell$", yaxis_title=r"$D_\ell\;[\mu\mathrm{K}^2]$"))
+        fig = go.FigureWidget(layout=layout)
 
         def _update(change=None):
             fig.data = []
