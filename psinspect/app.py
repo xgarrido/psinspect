@@ -88,10 +88,12 @@ class App:
         # https://stackoverflow.com/questions/25360714/avoid-red-background-color-for-logging-output-in-ipython-notebook
         self.log.handlers[0].stream = sys.stdout
 
-        self.registered_callback = []
-        self.updated_tab = set()
         if dict_file:
             os.environ[_psinspect_dict_file] = os.path.realpath(dict_file)
+
+        self.registered_callback = list()
+        self.updated_tab = set()
+        self.db = dict()
 
         # Initialize first the footer i.e. the dumper and then the loader since a dict file can be
         # passed as argument and then will need the dumper to work
@@ -214,14 +216,18 @@ class App:
         self.cross_list = pspipe_list.get_spec_name_list(d, delimiter="_")
         self.survey_list = pspipe_list.get_map_set_list(d)
         color_list = sns.color_palette("deep", n_colors=len(self.cross_list)).as_hex()
-        self.db = {name: Bunch(color=color_list[i]) for i, name in enumerate(self.cross_list)}
+        self.colors = {name: color_list[i] for i, name in enumerate(self.cross_list)}
+        self.colors.update({name: self.colors["{0}x{0}".format(name)] for name in self.survey_list})
+        # self.db = {name: Bunch(color=color_list[i]) for i, name in enumerate(self.cross_list)}
         self.log.debug(f"survey list: {self.survey_list}")
         self.log.debug(f"cross list: {self.cross_list}")
 
     @logger.capture()
     def _update_passbands(self):
-        passbands = {}
+        _key = "passband"
         for survey in self.survey_list:
+            if (survey, _key) in self.db:
+                continue
             nu_ghz, pb = None, None
             freq_info = d[f"freq_info_{survey}"]
             if d["do_bandpass_integration"]:
@@ -230,11 +236,9 @@ class App:
             else:
                 nu_ghz, pb = np.array([freq_info["freq_tag"]]), np.array([1.0])
             if nu_ghz is not None:
-                passbands[survey] = Bunch(
-                    nu_ghz=nu_ghz, pb=pb, color=self.db["{0}x{0}".format(survey)].color
-                )
+                self.db.setdefault((survey, _key), Bunch()).update(nu_ghz=nu_ghz, pb=pb)
 
-        if not passbands:
+        if _key not in sum(self.db.keys(), ()):
             self.log.debug("Passbands information unreachable")
             return
 
@@ -244,32 +248,33 @@ class App:
         layout = base_layout.copy()
         layout.update(dict(xaxis_title="frequency [GHz]", yaxis_title="transmission"))
         fig = go.FigureWidget(layout=layout)
-        for survey, meta in passbands.items():
-            fig.add_scatter(
-                name=survey,
-                x=meta.nu_ghz,
-                y=meta.pb,
-                mode="lines",
-                line=dict(color=meta.color),
-            )
+        for survey in self.survey_list:
+            if meta := self.db.get((survey, _key)):
+                fig.add_scatter(
+                    name=survey,
+                    x=meta.nu_ghz,
+                    y=meta.pb,
+                    mode="lines",
+                    line=dict(color=self.colors[survey]),
+                )
 
         self._update_tab(fig)
 
     @logger.capture()
     def _update_beams(self):
-        beams = {}
+        _key = "beam"
         for survey in self.survey_list:
+            if (survey, _key) in self.db:
+                continue
             if not os.path.exists(fn_beam_T := d[f"beam_T_{survey}"]):
                 continue
             if not os.path.exists(fn_beam_pol := d[f"beam_pol_{survey}"]):
                 continue
             ell, bl = misc.read_beams(fn_beam_T, fn_beam_pol)
             idx = np.where((ell >= 2) & (ell < self.lmax))
-            beams[survey] = Bunch(
-                ell=ell, bl=bl, idx=idx, color=self.db["{0}x{0}".format(survey)].color
-            )
+            self.db.setdefault((survey, _key), Bunch()).update(ell=ell, bl=bl, idx=idx)
 
-        if not beams:
+        if _key not in sum(self.db.keys(), ()):
             self.log.debug("Beams information unreachable")
             return
 
@@ -295,16 +300,15 @@ class App:
         def _update(change=None):
             fig.data = []
             for survey, mode in product(surveys.value, modes.value):
-                self.log.debug(f"{survey} - {mode}")
-                beam = beams[survey]
-                fig.add_scatter(
-                    name=f"{survey} - {mode}",
-                    x=beam.ell[beam.idx],
-                    y=beam.bl[mode][idx],
-                    mode="lines",
-                    line=dict(color=beam.color),
-                    opacity=1 - mode_options.index(mode) / len(mode_options),
-                )
+                if meta := self.db.get((survey, _key)):
+                    fig.add_scatter(
+                        name=f"{survey} - {mode}",
+                        x=meta.ell[meta.idx],
+                        y=meta.bl[mode][meta.idx],
+                        mode="lines",
+                        line=dict(color=self.colors[survey]),
+                        opacity=1 - mode_options.index(mode) / len(mode_options),
+                    )
 
         surveys.observe(_update, names="value")
         modes.observe(_update, names="value")
@@ -434,7 +438,7 @@ class App:
                 lmax=self.lmax,
                 spectra=self.spectra,
             )
-            self.db[name].update(ell=ell, cmb_and_fg=cmb_and_fg_dict)
+            self.db.setdefault(name, Bunch()).update(ell=ell, cmb_and_fg=cmb_and_fg_dict)
 
         layout = base_layout.copy()
         layout.update(dict(xaxis_title="$\ell$", yaxis_title=r"$D_\ell\;[\mu\mathrm{K}^2]$"))
@@ -449,7 +453,7 @@ class App:
                     x=meta.ell,
                     y=meta.cmb_and_fg[spectrum.value],
                     mode="lines",
-                    line=dict(color=meta.color),
+                    line=dict(color=self.colors[name]),
                 )
 
         spectrum = widgets.Dropdown(
