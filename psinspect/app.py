@@ -7,15 +7,16 @@ from itertools import product
 import ipywidgets as widgets
 import numpy as np
 import plotly.graph_objects as go
-import psinspect
 import seaborn as sns
 from ipyfilechooser import FileChooser
 from IPython.display import HTML, display
-from psinspect._version import version
 from pspipe import conventions as cvt
 from pspipe_utils import best_fits, log, misc, pspipe_list
 from pspy import so_dict
 from voila.app import Voila
+
+import psinspect
+from psinspect._version import version
 
 _psinspect_dict_file = "PSINSPECT_DICT_FILE"
 _psinspect_debug_flag = "PSINSPECT_DEBUG_FLAG"
@@ -27,6 +28,11 @@ base_layout = dict(
     template="plotly_white",
     legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
 )
+
+
+# Empty widget that acts as a placeholder when updating latter the content of the tab
+class Empty(widgets.HTML):
+    pass
 
 
 class Bunch:
@@ -66,8 +72,6 @@ banner = """
 class App:
     """An ipywidgets and plotly application for checking PSpipe productions"""
 
-    loaded: bool = False
-
     def initialize(self, dict_file=None, debug=False):
         # This is to fix loading of mathjax that is not correctly done and make the application totally
         # bugging see https://github.com/microsoft/vscode-jupyter/issues/8131#issuecomment-1589961116
@@ -84,6 +88,8 @@ class App:
         # https://stackoverflow.com/questions/25360714/avoid-red-background-color-for-logging-output-in-ipython-notebook
         self.log.handlers[0].stream = sys.stdout
 
+        self.registered_callback = []
+        self.updated_tab = set()
         if dict_file:
             os.environ[_psinspect_dict_file] = os.path.realpath(dict_file)
 
@@ -119,7 +125,16 @@ class App:
         self._update_maps()
         self._update_best_fits()
 
-        self.log.info("done")
+        def _update(change=None):
+            if (index := self.tab.selected_index) in self.updated_tab:
+                return
+            self.registered_callback[index]()
+            self.updated_tab.add(index)
+
+        self.tab.observe(_update, names="selected_index")
+        if self.tab.children:
+            _update()
+        self.log.info("Updating done")
 
     def _initialize_footer(self):
         self.dict_dump = widgets.Output()
@@ -160,7 +175,8 @@ class App:
 
         def _load_dict(chooser):
             d.read_from_file(chooser.selected)
-            self.loaded = True
+            self.registered_callback.clear()
+            self.updated_tab.clear()
             self.update()
 
         self.file_chooser = FileChooser(
@@ -177,9 +193,19 @@ class App:
             self.body = widgets.HTML(value=banner)
         self.app = widgets.VBox([self.header, self.body, self.footer])
 
-    def _add_tab(self, widget, title):
-        self.tab.children += (widget,)
+    def _add_tab(self, title="", callback=None):
+        if callback in self.registered_callback:
+            return False
+
+        self.tab.children += (Empty(),)
         self.tab.set_title(len(self.tab.children) - 1, title)
+        self.registered_callback += [callback]
+        return True
+
+    def _update_tab(self, widget):
+        children = list(self.tab.children)
+        children[self.tab.selected_index] = widget
+        self.tab.children = children
 
     @logger.capture()
     def _update_info(self):
@@ -210,6 +236,10 @@ class App:
 
         if not passbands:
             self.log.debug("Passbands information unreachable")
+            return
+
+        if self._add_tab(title="Bandpass", callback=self._update_passbands):
+            return
 
         layout = base_layout.copy()
         layout.update(dict(xaxis_title="frequency [GHz]", yaxis_title="transmission"))
@@ -223,13 +253,17 @@ class App:
                 line=dict(color=meta.color),
             )
 
-        self._add_tab(fig, "Bandpass")
+        self._update_tab(fig)
 
     @logger.capture()
     def _update_beams(self):
         beams = {}
         for survey in self.survey_list:
-            ell, bl = misc.read_beams(d[f"beam_T_{survey}"], d[f"beam_pol_{survey}"])
+            if not os.path.exists(fn_beam_T := d[f"beam_T_{survey}"]):
+                continue
+            if not os.path.exists(fn_beam_pol := d[f"beam_pol_{survey}"]):
+                continue
+            ell, bl = misc.read_beams(fn_beam_T, fn_beam_pol)
             idx = np.where((ell >= 2) & (ell < self.lmax))
             beams[survey] = Bunch(
                 ell=ell, bl=bl, idx=idx, color=self.db["{0}x{0}".format(survey)].color
@@ -237,11 +271,15 @@ class App:
 
         if not beams:
             self.log.debug("Beams information unreachable")
+            return
+
+        if self._add_tab(title="Beams", callback=self._update_beams):
+            return
 
         base_widget = widgets.HBox(
             [
                 surveys := widgets.SelectMultiple(
-                    description="Survey", options=self.survey_list, value=[self.survey_list[0]]
+                    description="Survey", options=self.survey_list, value=self.survey_list
                 ),
                 modes := widgets.SelectMultiple(
                     description="Mode",
@@ -272,12 +310,16 @@ class App:
         modes.observe(_update, names="value")
         _update()
 
-        self._add_tab(widgets.VBox([base_widget, fig]), "Beams")
+        self._update_tab(widgets.VBox([base_widget, fig]))
 
     @logger.capture()
     def _update_windows(self):
+        self.log.debug("Entering _update_windows")
         if not (directory := directory_exists("windows")):
             self.log.debug("No windows directory")
+            return
+
+        if self._add_tab(title="Window masks", callback=self._update_windows):
             return
 
         base_widget = widgets.HBox(
@@ -314,13 +356,16 @@ class App:
         masks.observe(_update, names="value")
         _update()
 
-        self._add_tab(widgets.VBox([base_widget, img_widgets]), "Window masks")
+        self._update_tab(widgets.VBox([base_widget, img_widgets]))
         self.log.info(f"Directory '{directory}' loaded")
 
     @logger.capture()
     def _update_maps(self):
         if not (directory := directory_exists("plots/maps")):
             self.log.debug("No plots/maps directory")
+            return
+
+        if self._add_tab(title="Maps", callback=self._update_maps):
             return
 
         nbr_splits = {len(d[f"maps_{survey}"]) for survey in self.survey_list}
@@ -370,13 +415,17 @@ class App:
         modes.observe(_update, names="value")
         _update()
 
-        self._add_tab(widgets.VBox([base_widget, img_widgets]), "Maps")
+        self._update_tab(widgets.VBox([base_widget, img_widgets]))
         self.log.info(f"Directory '{directory}' loaded")
 
     @logger.capture()
     def _update_best_fits(self):
+        self.log.debug("Entering _update_best_fits")
         if not (directory := directory_exists("best_fits")):
             self.log.debug("No best fits directory")
+            return
+
+        if self._add_tab(title="CMB & Foregrounds", callback=self._update_best_fits):
             return
 
         for name in self.cross_list:
@@ -409,7 +458,7 @@ class App:
         spectrum.observe(_update, names="value")
         _update()
 
-        self._add_tab(widgets.VBox([spectrum, fig]), "CMB & Foregrounds")
+        self._update_tab(widgets.VBox([spectrum, fig]))
         self.log.info(f"Directory '{directory}' loaded")
 
 
