@@ -1,8 +1,10 @@
 # import glob
 import logging
 import os
+import pickle
 import sys
 from itertools import product
+from numbers import Number
 
 import ipywidgets as widgets
 import numpy as np
@@ -10,24 +12,20 @@ import plotly.graph_objects as go
 import seaborn as sns
 from ipyfilechooser import FileChooser
 from IPython.display import HTML, display
+from plotly.subplots import make_subplots
 from pspipe import conventions as cvt
 from pspipe_utils import best_fits, log, misc, pspipe_list
 from pspy import so_dict
 from voila.app import Voila
 
 import psinspect
-from psinspect._version import version
 
 _psinspect_dict_file = "PSINSPECT_DICT_FILE"
+_psinspect_theme = "PSINSPECT_THEME"
 _psinspect_debug_flag = "PSINSPECT_DEBUG_FLAG"
 
+palette = "deep"
 d = so_dict.so_dict()
-
-base_layout = dict(
-    height=800,
-    template="plotly_white",
-    legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-)
 
 
 # Empty widget that acts as a placeholder when updating latter the content of the tab
@@ -63,6 +61,9 @@ banner = """
 <b><font size="+3">PS Pipeline Inspector</font></b>
 </p>
 <p>
+{version}
+</p>
+<p>
 <font size="+1">Select a dict file</font>
 </p>
 </center>
@@ -73,6 +74,11 @@ class App:
     """An ipywidgets and plotly application for checking PSpipe productions"""
 
     def initialize(self, dict_file=None, debug=False):
+        self.base_layout = dict(
+            height=800,
+            template=os.getenv(_psinspect_theme, "plotly_white"),
+            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
+        )
         # This is to fix loading of mathjax that is not correctly done and make the application totally
         # bugging see https://github.com/microsoft/vscode-jupyter/issues/8131#issuecomment-1589961116
         display(
@@ -81,9 +87,10 @@ class App:
             )
         )
         self.log = log.get_logger(
-            debug=bool(os.getenv(_psinspect_debug_flag, debug)),
+            debug=os.getenv(_psinspect_debug_flag) == "True" or debug,
             fmt="%(asctime)s - %(levelname)s: %(message)s",
         )
+
         # To avoid red background
         # https://stackoverflow.com/questions/25360714/avoid-red-background-color-for-logging-output-in-ipython-notebook
         self.log.handlers[0].stream = sys.stdout
@@ -136,16 +143,14 @@ class App:
         self.tab.observe(_update, names="selected_index")
         if self.tab.children:
             _update()
-        self.log.info("Updating done")
+        self.log.info(f"psinspector {psinspect.__version__} succesfully loaded")
 
     def _initialize_footer(self):
         self.dict_dump = widgets.Output()
         self.dumper = widgets.RadioButtons(options=["print", "json", "yaml"])
         self.dumper.observe(self._dict_dump, names="value")
         self.footer = widgets.Accordion(
-            children=[logger, self.dict_dump],
-            titles=["Logs", "Dict dump"],
-            selected_index=0,
+            children=[logger, self.dict_dump], titles=["Logs", "Dict dump"]
         )
 
     def _dict_dump(self, change=None):
@@ -177,6 +182,7 @@ class App:
 
         def _load_dict(chooser):
             d.read_from_file(chooser.selected)
+            self.footer.selected_index = 0
             self.registered_callback.clear()
             self.updated_tab.clear()
             self.update()
@@ -192,7 +198,7 @@ class App:
 
     def _initialize_app(self):
         if not hasattr(self, "body"):
-            self.body = widgets.HTML(value=banner)
+            self.body = widgets.HTML(value=banner.format(version=psinspect.__version__))
         self.app = widgets.VBox([self.header, self.body, self.footer])
 
     def _add_tab(self, title="", callback=None):
@@ -209,13 +215,24 @@ class App:
         children[self.tab.selected_index] = widget
         self.tab.children = children
 
+    def _add_db_entry(self, key, **value):
+        if isinstance(key, (str, Number)):
+            key = tuple(key)
+        self.db.setdefault(key, Bunch()).update(**value)
+
+    def _get_db_entry(self, key):
+        return self.db.get(tuple(key) if isinstance(key, (str, Number)) else key)
+
+    def _has_db_entry(self, key):
+        return key in sum(self.db.keys(), ())
+
     @logger.capture()
     def _update_info(self):
         self.spectra = cvt.spectra
         self.lmax = d["lmax"]
         self.cross_list = pspipe_list.get_spec_name_list(d, delimiter="_")
         self.survey_list = pspipe_list.get_map_set_list(d)
-        color_list = sns.color_palette("deep", n_colors=len(self.cross_list)).as_hex()
+        color_list = sns.color_palette(palette, n_colors=len(self.cross_list)).as_hex()
         self.colors = {name: color_list[i] for i, name in enumerate(self.cross_list)}
         self.colors.update({name: self.colors["{0}x{0}".format(name)] for name in self.survey_list})
         # self.db = {name: Bunch(color=color_list[i]) for i, name in enumerate(self.cross_list)}
@@ -226,7 +243,7 @@ class App:
     def _update_passbands(self):
         _key = "passband"
         for survey in self.survey_list:
-            if (survey, _key) in self.db:
+            if self._has_db_entry(key=(survey, _key)):
                 continue
             nu_ghz, pb = None, None
             freq_info = d[f"freq_info_{survey}"]
@@ -236,26 +253,22 @@ class App:
             else:
                 nu_ghz, pb = np.array([freq_info["freq_tag"]]), np.array([1.0])
             if nu_ghz is not None:
-                self.db.setdefault((survey, _key), Bunch()).update(nu_ghz=nu_ghz, pb=pb)
+                self._add_db_entry(key=(survey, _key), nu_ghz=nu_ghz, pb=pb)
 
-        if _key not in sum(self.db.keys(), ()):
+        if not self._has_db_entry(_key):
             self.log.debug("Passbands information unreachable")
             return
 
         if self._add_tab(title="Bandpass", callback=self._update_passbands):
             return
 
-        layout = base_layout.copy()
+        layout = self.base_layout.copy()
         layout.update(dict(xaxis_title="frequency [GHz]", yaxis_title="transmission"))
         fig = go.FigureWidget(layout=layout)
         for survey in self.survey_list:
-            if meta := self.db.get((survey, _key)):
+            if meta := self._get_db_entry((survey, _key)):
                 fig.add_scatter(
-                    name=survey,
-                    x=meta.nu_ghz,
-                    y=meta.pb,
-                    mode="lines",
-                    line=dict(color=self.colors[survey]),
+                    name=survey, x=meta.nu_ghz, y=meta.pb, line_color=self.colors[survey]
                 )
 
         self._update_tab(fig)
@@ -264,7 +277,7 @@ class App:
     def _update_beams(self):
         _key = "beam"
         for survey in self.survey_list:
-            if (survey, _key) in self.db:
+            if self._has_db_entry(key=(survey, _key)):
                 continue
             if not os.path.exists(fn_beam_T := d[f"beam_T_{survey}"]):
                 continue
@@ -272,9 +285,9 @@ class App:
                 continue
             ell, bl = misc.read_beams(fn_beam_T, fn_beam_pol)
             idx = np.where((ell >= 2) & (ell < self.lmax))
-            self.db.setdefault((survey, _key), Bunch()).update(ell=ell, bl=bl, idx=idx)
+            self._add_db_entry(key=(survey, _key), ell=ell, bl=bl, idx=idx)
 
-        if _key not in sum(self.db.keys(), ()):
+        if not self._has_db_entry(_key):
             self.log.debug("Beams information unreachable")
             return
 
@@ -293,20 +306,19 @@ class App:
                 ),
             ]
         )
-        layout = base_layout.copy()
+        layout = self.base_layout.copy()
         layout.update(dict(xaxis_title="$\ell$", yaxis_title="normalized beam"))
         fig = go.FigureWidget(layout=layout)
 
         def _update(change=None):
             fig.data = []
             for survey, mode in product(surveys.value, modes.value):
-                if meta := self.db.get((survey, _key)):
+                if meta := self._get_db_entry((survey, _key)):
                     fig.add_scatter(
                         name=f"{survey} - {mode}",
                         x=meta.ell[meta.idx],
                         y=meta.bl[mode][meta.idx],
-                        mode="lines",
-                        line=dict(color=self.colors[survey]),
+                        line_color=self.colors[survey],
                         opacity=1 - mode_options.index(mode) / len(mode_options),
                     )
 
@@ -318,7 +330,6 @@ class App:
 
     @logger.capture()
     def _update_windows(self):
-        self.log.debug("Entering _update_windows")
         if not (directory := directory_exists("windows")):
             self.log.debug("No windows directory")
             return
@@ -424,7 +435,6 @@ class App:
 
     @logger.capture()
     def _update_best_fits(self):
-        self.log.debug("Entering _update_best_fits")
         if not (directory := directory_exists("best_fits")):
             self.log.debug("No best fits directory")
             return
@@ -438,82 +448,127 @@ class App:
                 lmax=self.lmax,
                 spectra=self.spectra,
             )
-            self.db.setdefault(name, Bunch()).update(ell=ell, cmb_and_fg=cmb_and_fg_dict)
+            self._add_db_entry(key=(name, "cmb_and_fg"), ell=ell, cmb_and_fg=cmb_and_fg_dict)
 
-        layout = base_layout.copy()
-        layout.update(dict(xaxis_title="$\ell$", yaxis_title=r"$D_\ell\;[\mu\mathrm{K}^2]$"))
-        fig = go.FigureWidget(layout=layout)
+        # Individual foregrounds
+        if os.path.exists(fn := os.path.join(directory, "foregrounds.pkl")):
+            with open(fn, "rb") as f:
+                self._add_db_entry(key="foregrounds", **pickle.load(f))
 
+        # Theoritical CMB
+        ell, cmb = best_fits.cmb_dict_from_file(
+            os.path.join(directory, "cmb.dat"),
+            lmax=self.lmax,
+            spectra=self.spectra,
+        )
+        self._add_db_entry(key="cmb", ell=ell, cmb=cmb)
+
+        layout = self.base_layout.copy()
+        layout.update(dict(height=1000, showlegend=True))
+
+        fg_components = d["fg_components"]
+        for mode in fg_components:
+            if (comp := "tSZ_and_CIB") in fg_components[mode]:
+                fg_components[mode].remove(comp)
+                fg_components[mode] += ["tSZ", "cibc", "tSZxCIB"]
+        fg_colors = set(sum(fg_components.values(), []))
+        color_list = sns.color_palette(palette, n_colors=len(fg_colors)).as_hex()
+        fg_colors = {comp: color_list[i] for i, comp in enumerate(fg_colors)}
+
+        @logger.capture()
         def _update(change=None):
-            fig.data = []
-            fig.update_yaxes(type="log" if spectrum.value == "TT" else "linear")
-            for name, meta in self.db.items():
-                fig.add_scatter(
-                    name=name,
-                    x=meta.ell,
-                    y=meta.cmb_and_fg[spectrum.value],
-                    mode="lines",
-                    line=dict(color=self.colors[name]),
-                )
+            surveys = set(sum([cross.split("x") for cross in crosses.value], []))
+            nsurvey = min(len(surveys), len(crosses.value))
+            subplot_titles = np.full((nsurvey, nsurvey), None)
+            indices = np.triu_indices(nsurvey)[::-1]
+            for i, name in enumerate(crosses.value):
+                irow, icol = indices[0][i], indices[1][i]
+                subplot_titles[irow, icol] = name
 
-        spectrum = widgets.Dropdown(
-            value=self.spectra[0], options=self.spectra, description="Spectrum"
+            figure = make_subplots(
+                rows=nsurvey,
+                cols=nsurvey,
+                shared_xaxes=True,
+                shared_yaxes=True,
+                subplot_titles=subplot_titles.flatten().tolist(),
+                x_title="$\ell$",
+                y_title="$D_\ell\;[\mu\mathrm{K}^2]$",
+                vertical_spacing=0.15 / nsurvey,
+                horizontal_spacing=0.05 / nsurvey,
+            )
+            figure.update_layout(**layout)
+
+            mode = spectrum.value
+            for i, name in enumerate(crosses.value):
+                rowcol_kwargs = dict(row=indices[0][i] + 1, col=indices[1][i] + 1)
+                if not (meta := self._get_db_entry(key=(name, "cmb_and_fg"))):
+                    continue
+                cmb_and_fg_kwargs = dict(
+                    name="cmb + foregrounds",
+                    x=meta.ell,
+                    y=meta.cmb_and_fg[mode],
+                    line_color="black" if "white" in layout.get("template", "") else "white",
+                    legendgroup="cmb_and_fg",
+                    showlegend=i == 0,
+                )
+                figure.add_scatter(**cmb_and_fg_kwargs, **rowcol_kwargs)
+                if not (meta := self._get_db_entry(key="cmb")):
+                    continue
+                cmb_only_kwargs = dict(
+                    name="cmb",
+                    x=meta.ell,
+                    y=meta.cmb[mode],
+                    line_color="gray",
+                    legendgroup="cmb",
+                    showlegend=i == 0,
+                )
+                figure.add_scatter(**cmb_only_kwargs, **rowcol_kwargs)
+                if not (meta := self._get_db_entry(key="foregrounds")):
+                    continue
+                name1, name2 = name.split("x")
+                all_fg_kwargs = dict(
+                    name="all foregrounds",
+                    x=meta.ell,
+                    y=meta.fg_dict[mode.lower(), "all", name1, name2],
+                    line_color="gray",
+                    line_dash="dash",
+                    legendgroup="all",
+                    showlegend=i == 0,
+                )
+                figure.add_scatter(**all_fg_kwargs, **rowcol_kwargs)
+                for j, comp in enumerate(fg_components[mode.lower()]):
+                    figure.add_scatter(
+                        name=comp,
+                        x=meta.ell,
+                        y=meta.fg_dict[mode.lower(), comp, name1, name2],
+                        line_color=fg_colors[comp],
+                        legendgroup=comp,
+                        showlegend=i == 0,
+                        **rowcol_kwargs,
+                    )
+                figure.update_yaxes(
+                    type="log" if mode == "TT" else "linear",
+                    range=[-1, 4] if mode == "TT" else None,
+                    **rowcol_kwargs,
+                )
+            if change:
+                tab = self.tab.children[self.tab.selected_index]
+                children = list(tab.children)
+                children[-1] = go.FigureWidget(figure)
+                tab.children = children
+            else:
+                return go.FigureWidget(figure)
+
+        spectra = ["TT", "TE", "TB", "EE", "EB", "BB"]
+        spectrum = widgets.Dropdown(value=spectra[0], options=spectra, description="Spectrum")
+        crosses = widgets.SelectMultiple(
+            description="Cross", options=self.cross_list, value=self.cross_list
         )
         spectrum.observe(_update, names="value")
-        _update()
+        crosses.observe(_update, names="value")
 
-        self._update_tab(widgets.VBox([spectrum, fig]))
+        self._update_tab(widgets.VBox([widgets.HBox([spectrum, crosses]), _update()]))
         self.log.info(f"Directory '{directory}' loaded")
-
-
-#         ###
-
-
-#         fg_dict = best_fits.get_foreground_dict(
-#             l_th, passbands, d["fg_components"], d["fg_params"], d["fg_norm"]
-#         )
-
-#         ell, fg_dict = best_fits.fg_dict_from_files(
-#             os.path.join(dir, "fg_{}x{}.dat"), survey_list, lmax=lmax, spectra=spectra
-#         )
-#         print(fg_dict)
-#         for name in cross_list:
-#             db[name].update(ell_fg=ell, fg=fg_dict[*name.split("x")])
-
-#         fg_components = d["fg_components"]
-#         for spec in spectra:
-#             if (name := "tSZ_and_CIB") in (fg := fg_components.get(spec.lower(), [])):
-#                 fg.remove(name)
-#                 fg += ["tSZ", "cibc", "tSZxCIB"]
-
-#         def _update(change=None):
-#             fig.data = []
-#             fig.update_yaxes(type="log" if spectrum.value == "TT" else "linear")
-
-#             # for comp in fg_components[spectrum.value.lower()]:
-#             #     fig.add_scatter(
-#             #         name=comp,
-#             #         x=db[surveys.value].ell_fg,
-#             #         y=db[surveys.value].fg[comp],
-#             #         mode="lines",
-#             #         line=dict(color=meta.color),
-#             #     )
-#             logging.info(fg_components)
-
-#             return
-
-#         spectrum = widgets.Dropdown(
-#             options=(options := ["TT", "TE", "TB", "EE", "EB", "BB"]),
-#             value=options[0],
-#             description="Spectrum",
-#         )
-#         surveys = widgets.Dropdown(value=survey_list[0], options=survey_list, description="Survey")
-#         spectrum.observe(_update, names="value")
-#         surveys.observe(_update, names="value")
-#         _update()
-
-#         add_tab(widgets.VBox([widgets.HBox([surveys, spectrum]), fig]), "Foregrounds")
-#         logging.info(f"Directory {dir} loaded")
 
 
 def run(args=None):
@@ -528,7 +583,10 @@ def run(args=None):
     parser.add_argument(
         "-d", "--debug", help="Produce verbose debug output.", action="store_true", default=False
     )
-    parser.add_argument("--version", action="version", version=version)
+    parser.add_argument("--version", action="version", version=psinspect.__version__)
+    parser.add_argument(
+        "--theme", help="Set default voila theme", default="light", choices=["light", "dark"]
+    )
     arguments = parser.parse_args(args)
 
     logging.basicConfig(
@@ -549,6 +607,7 @@ def run(args=None):
     # (https://voila.readthedocs.io/en/stable/customize.html#adding-the-hook-function-to-voila)
     if dict_file:
         os.environ[_psinspect_dict_file] = os.path.realpath(dict_file)
+    os.environ[_psinspect_theme] = "plotly_white" if arguments.theme == "light" else "plotly_dark"
     os.environ[_psinspect_debug_flag] = str(arguments.debug)
 
     # create a voila instance
@@ -558,5 +617,6 @@ def run(args=None):
     app.initialize([notebook_path])
 
     app.voila_configuration.show_tracebacks = arguments.debug
+    app.voila_configuration.theme = arguments.theme
 
     app.start()
