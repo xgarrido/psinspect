@@ -15,7 +15,7 @@ from IPython.display import HTML, display
 from plotly.subplots import make_subplots
 from pspipe import conventions as cvt
 from pspipe_utils import best_fits, log, misc, pspipe_list
-from pspy import so_dict
+from pspy import pspy_utils, so_dict, so_spectra
 from voila.app import Voila
 
 import psinspect
@@ -132,7 +132,9 @@ class App:
         self._update_beams()
         self._update_windows()
         self._update_maps()
+        self._update_spectra()
         self._update_best_fits()
+        self._update_noise_model()
 
         def _update(change=None):
             if (index := self.tab.selected_index) in self.updated_tab:
@@ -273,21 +275,26 @@ class App:
 
         self._update_tab(fig)
 
-    @logger.capture()
-    def _update_beams(self):
-        _key = "beam"
+    # Global method since beams can be use and needed by other part of the code (see
+    # _update_noise_model for instance)
+    def _has_beams(self):
+        if self._has_db_entry(_key := "beam"):
+            return True
         for survey in self.survey_list:
             if self._has_db_entry(key=(survey, _key)):
                 continue
-            if not os.path.exists(fn_beam_T := d[f"beam_T_{survey}"]):
-                continue
-            if not os.path.exists(fn_beam_pol := d[f"beam_pol_{survey}"]):
+            if not os.path.exists(fn_beam_T := d[f"beam_T_{survey}"]) or not os.path.exists(
+                fn_beam_pol := d[f"beam_pol_{survey}"]
+            ):
                 continue
             ell, bl = misc.read_beams(fn_beam_T, fn_beam_pol)
             idx = np.where((ell >= 2) & (ell < self.lmax))
             self._add_db_entry(key=(survey, _key), ell=ell, bl=bl, idx=idx)
+        return self._has_db_entry(_key)
 
-        if not self._has_db_entry(_key):
+    @logger.capture()
+    def _update_beams(self):
+        if not self._has_beams():
             self.log.debug("Beams information unreachable")
             return
 
@@ -313,7 +320,7 @@ class App:
         def _update(change=None):
             fig.data = []
             for survey, mode in product(surveys.value, modes.value):
-                if meta := self._get_db_entry((survey, _key)):
+                if meta := self._get_db_entry((survey, "beam")):
                     fig.add_scatter(
                         name=f"{survey} - {mode}",
                         x=meta.ell[meta.idx],
@@ -434,6 +441,123 @@ class App:
         self.log.info(f"Directory '{directory}' loaded")
 
     @logger.capture()
+    def _update_spectra(self):
+        if not (directory := directory_exists("spectra")):
+            self.log.debug("No spectra directory")
+            return
+
+        if self._add_tab(title="Spectra", callback=self._update_spectra):
+            return
+
+        for name in self.cross_list:
+            cl_type = d["type"]
+            for kind in (kinds := ["cross", "auto", "noise"]):
+                ell, spectra = so_spectra.read_ps(
+                    os.path.join(directory, f"{cl_type}_{name}_{kind}.dat"), spectra=self.spectra
+                )
+                self._add_db_entry(key=(name, kind), ell=ell, spectra=spectra)
+
+            n_splits = d[f"n_splits_{name.split('_')[0]}"]
+            for split in (
+                splits := ["{}{}".format(*s) for s in product(range(n_splits), repeat=2)]
+            ):
+                if not os.path.exists(
+                    fn := os.path.join(directory, f"{cl_type}_{name}_{split}.dat")
+                ):
+                    continue
+                ell, spectra = so_spectra.read_ps(fn, spectra=self.spectra)
+                self._add_db_entry(key=(name, split), ell=ell, spectra=spectra)
+
+        base_widget = widgets.HBox(
+            [
+                spectrum := widgets.Dropdown(
+                    description="Spectrum", options=self.spectra, value=self.spectra[0]
+                ),
+                crosses := widgets.SelectMultiple(
+                    description="Cross", options=self.cross_list, value=self.cross_list
+                ),
+                kinds := widgets.SelectMultiple(description="Kind", options=kinds, value=["cross"]),
+                splits := widgets.SelectMultiple(description="Split", options=splits),
+            ]
+        )
+
+        layout = self.base_layout.copy()
+        layout.update(dict(height=1000))
+
+        @logger.capture()
+        def _update(change=None):
+            surveys = set(sum([cross.split("x") for cross in crosses.value], []))
+            nsurvey = min(len(surveys), len(crosses.value))
+            subplot_titles = np.full((nsurvey, nsurvey), None)
+            indices = np.triu_indices(nsurvey)[::-1]
+            for i, name in enumerate(crosses.value):
+                irow, icol = indices[0][i], indices[1][i]
+                subplot_titles[irow, icol] = name
+
+            figure = make_subplots(
+                rows=nsurvey,
+                cols=nsurvey,
+                shared_xaxes=True,
+                shared_yaxes=True,
+                subplot_titles=subplot_titles.flatten().tolist(),
+                x_title="$\ell$",
+                y_title="$D_\ell\;[\mu\mathrm{K}^2]$",
+                vertical_spacing=0.15 / nsurvey,
+                horizontal_spacing=0.05 / nsurvey,
+            )
+            figure.update_layout(**layout)
+
+            mode = spectrum.value
+            for i, name in enumerate(crosses.value):
+                rowcol_kwargs = dict(row=indices[0][i] + 1, col=indices[1][i] + 1)
+                line_dash = {"cross": "solid", "auto": "dash", "noise": "dot"}
+                for kind in kinds.value:
+                    if meta := self._get_db_entry(key=(name, kind)):
+                        figure.add_scatter(
+                            name=kind,
+                            x=meta.ell,
+                            y=meta.spectra[mode],
+                            line_color=self.colors[name],
+                            line_dash=line_dash[kind],
+                            legendgroup=kind,
+                            showlegend=i == 0,
+                            **rowcol_kwargs,
+                        )
+
+                for split in splits.value:
+                    if meta := self._get_db_entry(key=(name, split)):
+                        figure.add_scatter(
+                            name=f"split {split}",
+                            x=meta.ell,
+                            y=meta.spectra[mode],
+                            line_color=self.colors[name],
+                            opacity=0.25,
+                            showlegend=False,
+                            **rowcol_kwargs,
+                        )
+
+                figure.update_yaxes(
+                    type="log" if mode == "TT" else "linear",
+                    range=[-1, 4] if mode == "TT" else None,
+                    **rowcol_kwargs,
+                )
+            if change:
+                tab = self.tab.children[self.tab.selected_index]
+                children = list(tab.children)
+                children[-1] = go.FigureWidget(figure)
+                tab.children = children
+            else:
+                return go.FigureWidget(figure)
+
+        spectrum.observe(_update, names="value")
+        crosses.observe(_update, names="value")
+        kinds.observe(_update, names="value")
+        splits.observe(_update, names="value")
+
+        self._update_tab(widgets.VBox([base_widget, _update()]))
+        self.log.info(f"Directory '{directory}' loaded")
+
+    @logger.capture()
     def _update_best_fits(self):
         if not (directory := directory_exists("best_fits")):
             self.log.debug("No best fits directory")
@@ -463,9 +587,7 @@ class App:
         )
         self._add_db_entry(key="cmb", ell=ell, cmb=cmb)
 
-        layout = self.base_layout.copy()
-        layout.update(dict(height=1000, showlegend=True))
-
+        # Set foregrounds name and unique color
         fg_components = d["fg_components"]
         for mode in fg_components:
             if (comp := "tSZ_and_CIB") in fg_components[mode]:
@@ -474,6 +596,22 @@ class App:
         fg_colors = set(sum(fg_components.values(), []))
         color_list = sns.color_palette(palette, n_colors=len(fg_colors)).as_hex()
         fg_colors = {comp: color_list[i] for i, comp in enumerate(fg_colors)}
+
+        base_widget = widgets.HBox(
+            [
+                spectrum := widgets.Dropdown(
+                    options=(spectra := ["TT", "TE", "TB", "EE", "EB", "BB"]),
+                    value=spectra[0],
+                    description="Spectrum",
+                ),
+                crosses := widgets.SelectMultiple(
+                    description="Cross", options=self.cross_list, value=self.cross_list
+                ),
+            ]
+        )
+
+        layout = self.base_layout.copy()
+        layout.update(dict(height=1000))
 
         @logger.capture()
         def _update(change=None):
@@ -559,15 +697,120 @@ class App:
             else:
                 return go.FigureWidget(figure)
 
-        spectra = ["TT", "TE", "TB", "EE", "EB", "BB"]
-        spectrum = widgets.Dropdown(value=spectra[0], options=spectra, description="Spectrum")
-        crosses = widgets.SelectMultiple(
-            description="Cross", options=self.cross_list, value=self.cross_list
-        )
         spectrum.observe(_update, names="value")
         crosses.observe(_update, names="value")
 
-        self._update_tab(widgets.VBox([widgets.HBox([spectrum, crosses]), _update()]))
+        self._update_tab(widgets.VBox([base_widget, _update()]))
+        self.log.info(f"Directory '{directory}' loaded")
+
+    @logger.capture()
+    def _update_noise_model(self):
+        if not (directory := directory_exists("noise_model")):
+            self.log.debug("No noise model directory")
+            return
+
+        if self._add_tab(title="Noise model", callback=self._update_noise_model):
+            return
+
+        if not self._has_db_entry(key=("noise", "interpolate")):
+            ell, nl_dict = best_fits.noise_dict_from_files(
+                os.path.join(directory, "mean_{}x{}_{}_noise.dat"),
+                sv_list=(surveys := d["surveys"]),
+                arrays={sv: d[f"arrays_{sv}"] for sv in surveys},
+                lmax=self.lmax,
+                spectra=self.spectra,
+                n_splits=None,
+                # do not set to compare to original noise from data
+                # {sv: d[f"n_splits_{sv}"] for sv in surveys},
+            )
+            for k, v in nl_dict.items():
+                self._add_db_entry(
+                    key=("{0}_{1}x{0}_{2}".format(*k), "noise", "interpolate"), ell=ell, nl=v
+                )
+
+        if self._has_beams() and not self._has_db_entry(key=("noise", "data")):
+            # Must be impossible but never know
+            if not (spectra_dir := directory_exists("spectra")):
+                self.log.debug("No spectra directory")
+                return
+
+            for name in self.cross_list:
+                cl_type = d["type"]
+                c1, c2 = name.split("x")
+                lb, nbs_ar1xar1 = so_spectra.read_ps(
+                    os.path.join(spectra_dir, f"{cl_type}_{c1}x{c1}_noise.dat"),
+                    spectra=self.spectra,
+                )
+                lb, nbs_ar1xar2 = so_spectra.read_ps(
+                    os.path.join(spectra_dir, f"{cl_type}_{c1}x{c2}_noise.dat"),
+                    spectra=self.spectra,
+                )
+                b1 = self._get_db_entry(key=(c1, "beam"))
+                b2 = self._get_db_entry(key=(c2, "beam"))
+
+                bb_ar1, bb_ar2 = {}, {}
+                for field in "TEB":
+                    lb, bb_ar1[field] = pspy_utils.naive_binning(
+                        b1.ell, b1.bl[field], d["binning_file"], self.lmax
+                    )
+                    lb, bb_ar2[field] = pspy_utils.naive_binning(
+                        b2.ell, b2.bl[field], d["binning_file"], self.lmax
+                    )
+
+                for spec in self.spectra:
+                    X, Y = spec
+                    nbs_ar1xar1[spec] *= bb_ar1[X] * bb_ar1[Y]
+                    nbs_ar1xar2[spec] *= bb_ar1[X] * bb_ar2[Y]
+
+                self._add_db_entry(
+                    key=(cross, "noise", "data"),
+                    ell=lb,
+                    nl=nbs_ar1xar1 if c1 == c2 else nbs_ar1xar2,
+                )
+
+        base_widget = widgets.HBox(
+            [
+                spectrum := widgets.Dropdown(
+                    description="Mode",
+                    options=self.spectra,
+                    value=self.spectra[0],
+                ),
+                crosses := widgets.SelectMultiple(
+                    description="Cross", options=self.cross_list, value=self.cross_list
+                ),
+            ]
+        )
+        layout = self.base_layout.copy()
+        layout.update(dict(xaxis_title="$\ell$", yaxis_title="noise level [µK²]"))
+        fig = go.FigureWidget(layout=layout)
+
+        def _update(change=None):
+            fig.data = []
+            for cross in crosses.value:
+                if meta := self._get_db_entry((cross, "noise", "interpolate")):
+                    fig.add_scatter(
+                        name=cross,
+                        x=meta.ell,
+                        y=meta.nl[spectrum.value],
+                        line_color=self.colors[cross],
+                        legendgroup=cross,
+                    )
+                if meta := self._get_db_entry((cross, "noise", "data")):
+                    fig.add_scatter(
+                        name=cross,
+                        x=meta.ell,
+                        y=meta.nl[spectrum.value],
+                        mode="markers",
+                        marker_color=self.colors[cross],
+                        legendgroup=cross,
+                        showlegend=False,
+                    )
+
+        crosses.observe(_update, names="value")
+        spectrum.observe(_update, names="value")
+        _update()
+
+        self._update_tab(widgets.VBox([base_widget, fig]))
         self.log.info(f"Directory '{directory}' loaded")
 
 
