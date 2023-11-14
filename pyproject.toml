@@ -32,7 +32,7 @@ classifiers = [
 ]
 requires-python = ">=3.8.0"
 dependencies = [
-  "pspipe @ git+https://github.com/simonsobs/PSpipe.git",
+  "pspipe_utils",
   "jupyterlab",
   "ipyfilechooser",
   "plotly",

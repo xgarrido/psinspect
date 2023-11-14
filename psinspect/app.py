@@ -13,7 +13,6 @@ import seaborn as sns
 from ipyfilechooser import FileChooser
 from IPython.display import HTML, display
 from plotly.subplots import make_subplots
-from pspipe import conventions as cvt
 from pspipe_utils import best_fits, log, misc, pspipe_list
 from pspy import pspy_utils, so_dict, so_spectra
 from voila.app import Voila
@@ -24,6 +23,7 @@ _psinspect_dict_file = "PSINSPECT_DICT_FILE"
 _psinspect_theme = "PSINSPECT_THEME"
 _psinspect_debug_flag = "PSINSPECT_DEBUG_FLAG"
 
+_product_dir = "."
 palette = "deep"
 d = so_dict.so_dict()
 
@@ -48,7 +48,7 @@ class Bunch:
 
 
 def directory_exists(dirname):
-    return None if not os.path.exists(d := os.path.join(cvt._product_dir, dirname)) else d
+    return None if not os.path.exists(d := os.path.join(_product_dir, dirname)) else d
 
 
 # Global log widget to catch message
@@ -113,10 +113,10 @@ class App:
 
     @logger.capture()
     def update(self):
-        cvt._product_dir = self.file_chooser.selected_path
+        _product_dir = self.file_chooser.selected_path
         self._dict_dump()
 
-        self.log.info(f"Loading products from {cvt._product_dir} directory...")
+        self.log.info(f"Loading products from {_product_dir} directory...")
         self.tab = self.body = widgets.Tab(children=())
 
         if not hasattr(self, "app"):
@@ -230,7 +230,7 @@ class App:
 
     @logger.capture()
     def _update_info(self):
-        self.spectra = cvt.spectra
+        self.spectra = ["TT", "TE", "TB", "ET", "BT", "EE", "EB", "BE", "BB"]
         self.lmax = d["lmax"]
         self.cross_list = pspipe_list.get_spec_name_list(d, delimiter="_")
         self.survey_list = pspipe_list.get_map_set_list(d)
@@ -461,12 +461,9 @@ class App:
             for split in (
                 splits := ["{}{}".format(*s) for s in product(range(n_splits), repeat=2)]
             ):
-                if not os.path.exists(
-                    fn := os.path.join(directory, f"{cl_type}_{name}_{split}.dat")
-                ):
-                    continue
-                ell, spectra = so_spectra.read_ps(fn, spectra=self.spectra)
-                self._add_db_entry(key=(name, split), ell=ell, spectra=spectra)
+                if os.path.exists(fn := os.path.join(directory, f"{cl_type}_{name}_{split}.dat")):
+                    ell, spectra = so_spectra.read_ps(fn, spectra=self.spectra)
+                    self._add_db_entry(key=(name, split), ell=ell, spectra=spectra)
 
         base_widget = widgets.HBox(
             [
@@ -486,6 +483,7 @@ class App:
 
         @logger.capture()
         def _update(change=None):
+            mode = spectrum.value
             surveys = set(sum([cross.split("x") for cross in crosses.value], []))
             nsurvey = min(len(surveys), len(crosses.value))
             subplot_titles = np.full((nsurvey, nsurvey), None)
@@ -493,6 +491,8 @@ class App:
             for i, name in enumerate(crosses.value):
                 irow, icol = indices[0][i], indices[1][i]
                 subplot_titles[irow, icol] = name
+                if mode[0] != mode[1]:
+                    subplot_titles[icol, irow] = "{1}x{0}".format(*name.split("x"))
 
             figure = make_subplots(
                 rows=nsurvey,
@@ -507,34 +507,56 @@ class App:
             )
             figure.update_layout(**layout)
 
-            mode = spectrum.value
             for i, name in enumerate(crosses.value):
+                name1, name2 = name.split("x")
                 rowcol_kwargs = dict(row=indices[0][i] + 1, col=indices[1][i] + 1)
+                inverse_rowcol_kwargs = dict(row=indices[1][i] + 1, col=indices[0][i] + 1)
+                fill_upper = mode[0] != mode[1] and name1 != name2
                 line_dash = {"cross": "solid", "auto": "dash", "noise": "dot"}
                 for kind in kinds.value:
+                    kind_kwargs = dict(
+                        name=kind,
+                        line_color=self.colors[name],
+                        line_dash=line_dash[kind],
+                        legendgroup=kind,
+                    )
+
                     if meta := self._get_db_entry(key=(name, kind)):
                         figure.add_scatter(
-                            name=kind,
                             x=meta.ell,
                             y=meta.spectra[mode],
-                            line_color=self.colors[name],
-                            line_dash=line_dash[kind],
-                            legendgroup=kind,
                             showlegend=i == 0,
+                            **kind_kwargs,
                             **rowcol_kwargs,
                         )
+                        if fill_upper:
+                            figure.add_scatter(
+                                x=meta.ell,
+                                y=meta.spectra[mode[::-1]],
+                                showlegend=False,
+                                **kind_kwargs,
+                                **inverse_rowcol_kwargs,
+                            )
 
                 for split in splits.value:
+                    split_kwargs = dict(
+                        name=f"split {split}",
+                        line_color=self.colors[name],
+                        opacity=0.25,
+                        showlegend=False,
+                    )
+
                     if meta := self._get_db_entry(key=(name, split)):
                         figure.add_scatter(
-                            name=f"split {split}",
-                            x=meta.ell,
-                            y=meta.spectra[mode],
-                            line_color=self.colors[name],
-                            opacity=0.25,
-                            showlegend=False,
-                            **rowcol_kwargs,
+                            x=meta.ell, y=meta.spectra[mode], **split_kwargs, **rowcol_kwargs
                         )
+                        if fill_upper:
+                            figure.add_scatter(
+                                x=meta.ell,
+                                y=meta.spectra[mode[::-1]],
+                                **split_kwargs,
+                                **inverse_rowcol_kwargs,
+                            )
 
                 figure.update_yaxes(
                     type="log" if mode == "TT" else "linear",
@@ -615,6 +637,7 @@ class App:
 
         @logger.capture()
         def _update(change=None):
+            mode = spectrum.value
             surveys = set(sum([cross.split("x") for cross in crosses.value], []))
             nsurvey = min(len(surveys), len(crosses.value))
             subplot_titles = np.full((nsurvey, nsurvey), None)
@@ -622,6 +645,8 @@ class App:
             for i, name in enumerate(crosses.value):
                 irow, icol = indices[0][i], indices[1][i]
                 subplot_titles[irow, icol] = name
+                if mode[0] != mode[1]:
+                    subplot_titles[icol, irow] = "{1}x{0}".format(*name.split("x"))
 
             figure = make_subplots(
                 rows=nsurvey,
@@ -636,54 +661,73 @@ class App:
             )
             figure.update_layout(**layout)
 
-            mode = spectrum.value
             for i, name in enumerate(crosses.value):
-                rowcol_kwargs = dict(row=indices[0][i] + 1, col=indices[1][i] + 1)
-                if not (meta := self._get_db_entry(key=(name, "cmb_and_fg"))):
-                    continue
-                cmb_and_fg_kwargs = dict(
-                    name="cmb + foregrounds",
-                    x=meta.ell,
-                    y=meta.cmb_and_fg[mode],
-                    line_color="black" if "white" in layout.get("template", "") else "white",
-                    legendgroup="cmb_and_fg",
-                    showlegend=i == 0,
-                )
-                figure.add_scatter(**cmb_and_fg_kwargs, **rowcol_kwargs)
-                if not (meta := self._get_db_entry(key="cmb")):
-                    continue
-                cmb_only_kwargs = dict(
-                    name="cmb",
-                    x=meta.ell,
-                    y=meta.cmb[mode],
-                    line_color="gray",
-                    legendgroup="cmb",
-                    showlegend=i == 0,
-                )
-                figure.add_scatter(**cmb_only_kwargs, **rowcol_kwargs)
-                if not (meta := self._get_db_entry(key="foregrounds")):
-                    continue
                 name1, name2 = name.split("x")
-                all_fg_kwargs = dict(
-                    name="all foregrounds",
-                    x=meta.ell,
-                    y=meta.fg_dict[mode.lower(), "all", name1, name2],
-                    line_color="gray",
-                    line_dash="dash",
-                    legendgroup="all",
-                    showlegend=i == 0,
-                )
-                figure.add_scatter(**all_fg_kwargs, **rowcol_kwargs)
-                for j, comp in enumerate(fg_components[mode.lower()]):
-                    figure.add_scatter(
-                        name=comp,
+                rowcol_kwargs = dict(row=indices[0][i] + 1, col=indices[1][i] + 1)
+                inverse_rowcol_kwargs = dict(row=indices[1][i] + 1, col=indices[0][i] + 1)
+                fill_upper = mode[0] != mode[1] and name1 != name2
+
+                # CMB + foregrounds
+                if meta := self._get_db_entry(key=(name, "cmb_and_fg")):
+                    cmb_and_fg_kwargs = dict(
+                        name="cmb + foregrounds",
                         x=meta.ell,
-                        y=meta.fg_dict[mode.lower(), comp, name1, name2],
-                        line_color=fg_colors[comp],
-                        legendgroup=comp,
+                        y=meta.cmb_and_fg[mode],
+                        line_color="black" if "white" in layout.get("template", "") else "white",
+                        legendgroup="cmb_and_fg",
                         showlegend=i == 0,
-                        **rowcol_kwargs,
                     )
+                    figure.add_scatter(**cmb_and_fg_kwargs, **rowcol_kwargs)
+                    if fill_upper:
+                        figure.add_scatter(**cmb_and_fg_kwargs, **inverse_rowcol_kwargs)
+
+                # CMB only
+                if meta := self._get_db_entry(key="cmb"):
+                    cmb_only_kwargs = dict(
+                        name="cmb",
+                        x=meta.ell,
+                        y=meta.cmb[mode],
+                        line_color="gray",
+                        legendgroup="cmb",
+                        showlegend=i == 0,
+                    )
+                    figure.add_scatter(**cmb_only_kwargs, **rowcol_kwargs)
+                    if fill_upper:
+                        figure.add_scatter(**cmb_only_kwargs, **inverse_rowcol_kwargs)
+
+                # Individual foregrounds
+                if meta := self._get_db_entry(key="foregrounds"):
+                    all_fg_kwargs = dict(
+                        name="all foregrounds",
+                        x=meta.ell,
+                        y=meta.fg_dict[mode.lower(), "all", name1, name2],
+                        line_color="gray",
+                        line_dash="dash",
+                        legendgroup="all",
+                        showlegend=i == 0,
+                    )
+                    figure.add_scatter(**all_fg_kwargs, **rowcol_kwargs)
+                    if fill_upper:
+                        all_fg_kwargs.update(
+                            dict(y=meta.fg_dict[mode.lower(), "all", name2, name1])
+                        )
+                        figure.add_scatter(**all_fg_kwargs, **inverse_rowcol_kwargs)
+                    for comp in fg_components[mode.lower()]:
+                        individual_fg_kwargs = dict(
+                            name=comp,
+                            x=meta.ell,
+                            y=meta.fg_dict[mode.lower(), comp, name1, name2],
+                            line_color=fg_colors[comp],
+                            legendgroup=comp,
+                            showlegend=i == 0,
+                        )
+                        figure.add_scatter(**individual_fg_kwargs, **rowcol_kwargs)
+                        if fill_upper:
+                            individual_fg_kwargs.update(
+                                dict(y=meta.fg_dict[mode.lower(), comp, name2, name1])
+                            )
+                            figure.add_scatter(**individual_fg_kwargs, **inverse_rowcol_kwargs)
+
                 figure.update_yaxes(
                     type="log" if mode == "TT" else "linear",
                     range=[-1, 4] if mode == "TT" else None,
@@ -763,7 +807,7 @@ class App:
                     nbs_ar1xar2[spec] *= bb_ar1[X] * bb_ar2[Y]
 
                 self._add_db_entry(
-                    key=(cross, "noise", "data"),
+                    key=(name, "noise", "data"),
                     ell=lb,
                     nl=nbs_ar1xar1 if c1 == c2 else nbs_ar1xar2,
                 )

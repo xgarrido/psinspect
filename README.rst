@@ -27,36 +27,66 @@ calculations through `PSpipe <https://github.com/simonsobs/PSpipe>`_.
    * Scientific documentation: https://pspy.readthedocs.io/en/latest/scientific_doc.pdf
 
 
-..
-   Installing
-   ----------
 
-   .. code:: shell
+Installing
+----------
 
-       $ pip install pspy [--user]
+.. code:: shell
 
-   You can test your installation by running
+    pip install git+https://github.com/xgarrido/psinspect.git [--user]
 
-   .. code:: shell
+You can test if everything has been properly installed with
 
-       $ test-pspy
+.. code:: shell
 
-   If everything goes fine, no errors will occur. Otherwise, you can report your problem on the `Issues tracker <https://github.com/simonsobs/pspy/issues>`_.
+    psinspect
 
-   If you plan to develop ``pspy``, it is better to checkout the latest version by doing
+If everything goes fine, no errors will occur. Otherwise, you can report your problem on the `Issues tracker <https://github.com/xgarrido/psinspect/issues>`_.
 
-   .. code:: shell
+If you plan to develop/change something inside ``psinspect``, it is better to checkout the latest version by doing
 
-       $ git clone https://github.com/simonsobs/pspy.git /where/to/clone
+.. code:: shell
 
-   Then you can install the ``pspy`` library and its dependencies *via*
+    git clone https://github.com/xgarrido/psinspect.git /where/to/clone
 
-   .. code:: shell
+Then you can install the ``psinspect`` library and its dependencies *via*
 
-       $ pip install -e /where/to/clone
+.. code:: shell
 
-   The ``-e`` option allow the developer to make changes within the ``pspy`` directory without having
-   to reinstall at every changes.
+    pip install -e /where/to/clone
+
+The ``-e`` option allow the developer to make changes within the ``psinspect`` directory without having
+to reinstall at every changes.
+
+Using ``psinspect`` at NERSC
+----------------------------
+
+At NERSC, after having set ``python`` with ``module load python``, you can follow the same
+installation process and everything will be installed in your local home. Then you can go to `NERSC
+Jupyter Hub <https://jupyter.nersc.gov>`_ and start a notebook with the following minimal set of
+commands
+
+.. code:: python
+
+   from psinspect import App
+   my_app = App()
+   my_app.initialize()
+   my_app.start()
+
+Another (smarter) way is to encapsulate the whole installation stuff within a ``python`` virtual
+env. to avoid conflicts with your existing installation. To do so you can follow these command lines
+
+.. code:: shell
+
+   module load python
+   python -m venv /where/to/install/your/env
+   source /where/to/install/your/env/bin/activate
+   python -m pip install ipykernel
+   python -m ipykernel install --user --name=psinspect
+
+This will install a new kernel named ``psinspect`` that you can choose when you will create a new
+notebook in `NERSC Jupyter Hub <https://jupyter.nersc.gov>`_. Copy-paste the above ``python`` code
+and execute the cell.
 
 
 The code is part of `PSpipe <https://github.com/simonsobs/PSpipe>`_ the Simons Observatory power spectrum pipeline.
