@@ -47,10 +47,6 @@ class Bunch:
         return self.__dict__.__str__()
 
 
-def directory_exists(dirname):
-    return None if not os.path.exists(d := os.path.join(_product_dir, dirname)) else d
-
-
 # Global log widget to catch message
 logger = widgets.Output()
 
@@ -113,7 +109,7 @@ class App:
 
     @logger.capture()
     def update(self):
-        _product_dir = self.file_chooser.selected_path
+        self._product_dir = self.file_chooser.selected_path
         self._dict_dump()
 
         self.log.info(f"Loading products from {_product_dir} directory...")
@@ -241,6 +237,9 @@ class App:
         self.log.debug(f"survey list: {self.survey_list}")
         self.log.debug(f"cross list: {self.cross_list}")
 
+    def directory_exists(self, dirname):
+        return None if not os.path.exists(d := os.path.join(self._product_dir, dirname)) else d
+
     @logger.capture()
     def _update_passbands(self):
         _key = "passband"
@@ -337,7 +336,7 @@ class App:
 
     @logger.capture()
     def _update_windows(self):
-        if not (directory := directory_exists("windows")):
+        if not (directory := self.directory_exists("windows")):
             self.log.debug("No windows directory")
             return
 
@@ -383,7 +382,7 @@ class App:
 
     @logger.capture()
     def _update_maps(self):
-        if not (directory := directory_exists("plots/maps")):
+        if not (directory := self.directory_exists("plots/maps")):
             self.log.debug("No plots/maps directory")
             return
 
@@ -442,7 +441,7 @@ class App:
 
     @logger.capture()
     def _update_spectra(self):
-        if not (directory := directory_exists("spectra")):
+        if not (directory := self.directory_exists("spectra")):
             self.log.debug("No spectra directory")
             return
 
@@ -581,7 +580,7 @@ class App:
 
     @logger.capture()
     def _update_best_fits(self):
-        if not (directory := directory_exists("best_fits")):
+        if not (directory := self.directory_exists("best_fits")):
             self.log.debug("No best fits directory")
             return
 
@@ -749,7 +748,7 @@ class App:
 
     @logger.capture()
     def _update_noise_model(self):
-        if not (directory := directory_exists("noise_model")):
+        if not (directory := self.directory_exists("noise_model")):
             self.log.debug("No noise model directory")
             return
 
@@ -774,7 +773,7 @@ class App:
 
         if self._has_beams() and not self._has_db_entry(key=("noise", "data")):
             # Must be impossible but never know
-            if not (spectra_dir := directory_exists("spectra")):
+            if not (spectra_dir := self.directory_exists("spectra")):
                 self.log.debug("No spectra directory")
                 return
 
