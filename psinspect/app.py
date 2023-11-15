@@ -614,7 +614,7 @@ class App:
             if (comp := "tSZ_and_CIB") in fg_components[mode]:
                 fg_components[mode].remove(comp)
                 fg_components[mode] += ["tSZ", "cibc", "tSZxCIB"]
-        fg_colors = set(sum(fg_components.values(), []))
+        fg_colors = sorted(set(sum(fg_components.values(), [])))
         color_list = sns.color_palette(palette, n_colors=len(fg_colors)).as_hex()
         fg_colors = {comp: color_list[i] for i, comp in enumerate(fg_colors)}
 
