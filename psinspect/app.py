@@ -6,6 +6,7 @@ from itertools import product
 from numbers import Number
 
 import ipywidgets as widgets
+import matplotlib as mpl
 import numpy as np
 import plotly.graph_objects as go
 import seaborn as sns
@@ -306,16 +307,21 @@ class App:
         else:
             ell, cmb = pspy_utils.ps_from_params(d["cosmo_params"], d["type"], lmax=self.lmax)
 
-        modes = widgets.SelectMultiple(
-            description="Mode",
-            options=(mode_options := ["TT", "TE", "EE", "BB"]),
-            value=mode_options,
+        base_widget = widgets.HBox(
+            [
+                modes := widgets.SelectMultiple(
+                    description="Mode",
+                    options=(mode_options := ["TT", "TE", "EE", "BB"]),
+                    value=mode_options,
+                ),
+                palettes := widgets.Dropdown(
+                    description="Palette", options=list(mpl.colormaps.keys()), value="rocket"
+                ),
+            ]
         )
 
         # Compute range of spectra for later use with vertical rectangle (plotly function add_hrect
         # is to slow and does not allow hoverinfo)
-        color_list = sns.color_palette("rocket", n_colors=len(low)).as_hex()
-
         def get_range(y, fcn):
             yext = fcn(y)
             if fcn == np.min:
@@ -338,6 +344,8 @@ class App:
                 vertical_spacing=0.0,
             )
             fig.update_layout(**layout)
+
+            color_list = sns.color_palette(palettes.value, n_colors=len(low)).as_hex()
 
             for i, mode in enumerate(modes.value):
                 rowcol_kwargs = dict(row=i + 1, col=1)
@@ -376,8 +384,9 @@ class App:
             return self._refresh_figure(change, fig)
 
         modes.observe(_update, names="value")
+        palettes.observe(_update, names="value")
 
-        self._update_tab(widgets.VBox([modes, _update()]))
+        self._update_tab(widgets.VBox([base_widget, _update()]))
 
     @logger.capture()
     def _update_passbands(self):
@@ -444,10 +453,10 @@ class App:
                 ),
             ]
         )
-        layout = self.base_layout.copy()
-        layout.update(dict(xaxis_title="$\ell$", yaxis_title="normalized beam"))
 
         def _update(change=None):
+            layout = self.base_layout.copy()
+            layout.update(dict(xaxis_title="$\ell$", yaxis_title="normalized beam"))
             fig = go.Figure(layout=layout)
             for survey, mode in product(surveys.value, modes.value):
                 if meta := self._get_db_entry((survey, "beam")):
