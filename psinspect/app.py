@@ -193,11 +193,11 @@ class App:
 
     def _add_db_entry(self, key, **value):
         if isinstance(key, (str, Number)):
-            key = tuple(key)
+            key = (key,)
         self.db.setdefault(key, Bunch()).update(**value)
 
     def _get_db_entry(self, key):
-        return self.db.get(tuple(key) if isinstance(key, (str, Number)) else key)
+        return self.db.get((key,) if isinstance(key, (str, Number)) else key)
 
     @logger.capture()
     def _has_db_entry(self, key, flatten=False):
@@ -666,7 +666,7 @@ class App:
         base_widget = widgets.HBox(
             [
                 plots := widgets.ToggleButtons(
-                    description="Plot",
+                    # description="Plot",
                     options=["spectra", "residuals", "σ residuals"],
                     button_style="info",  # 'success', 'info', 'warning', 'danger' or ''
                     tooltips=[
