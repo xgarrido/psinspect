@@ -539,16 +539,17 @@ class App:
                 kinds := widgets.SelectMultiple(
                     description="Type",
                     options=(kind_options := ["split", "windowed_split", "no_filter_split"]),
-                    value=["split"],
+                    value=[kind_options[0]],
                 ),
                 modes := widgets.SelectMultiple(
                     description="Mode",
                     options=(mode_options := ["T", "Q", "U"]),
-                    value=["T"],
+                    value=[mode_options[0]],
                 ),
-                splits := widgets.RadioButtons(
+                splits := widgets.SelectMultiple(
                     description="Split",
                     options=(split_options := range(max(nbr_splits))),
+                    value=[split_options[0]],
                 ),
             ]
         )
