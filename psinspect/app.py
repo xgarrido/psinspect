@@ -54,7 +54,7 @@ logger = widgets.Output()
 banner = """
 <center>
 <b>
-<i class="fa-solid fa-magnifying-glass fa-flip fa-10x"></i>
+<i class="fa-solid fa-user-secret fa-flip fa-10x"></i>
 </b>
 <p>
 <b><font size="+3">PS Pipeline Inspector</font></b>
@@ -570,7 +570,7 @@ class App:
                     continue
                 with open(filename, "rb") as img:
                     img_widgets.children += (
-                        widgets.HTML(f"<h2>{kind} - {survey} - split {splits.value} - {mode}</h2>"),
+                        widgets.HTML(f"<h2>{kind} - {survey} - split {split} - {mode}</h2>"),
                         widgets.Image(value=img.read(), format="png", width="auto", height=400),
                     )
 
