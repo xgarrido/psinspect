@@ -562,8 +562,10 @@ class App:
 
         def _update(change=None):
             img_widgets.children = []
-            for kind, survey, mode in product(kinds.value, surveys.value, modes.value):
-                if not os.path.exists(filename := png_files[kind, survey, splits.value, mode]):
+            for kind, survey, mode, split in product(
+                kinds.value, surveys.value, modes.value, splits.value
+            ):
+                if not os.path.exists(filename := png_files[kind, survey, split, mode]):
                     self.log.debug(f"{filename} does not exist")
                     continue
                 with open(filename, "rb") as img:
