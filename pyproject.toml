@@ -32,6 +32,7 @@ classifiers = [
 ]
 requires-python = ">=3.8.0"
 dependencies = [
+  "colorlog",
   "pspipe_utils",
   "jupyterlab",
   "ipyfilechooser",

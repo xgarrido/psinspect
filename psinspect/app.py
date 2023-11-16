@@ -5,6 +5,7 @@ import sys
 from itertools import product
 from numbers import Number
 
+import colorlog
 import ipywidgets as widgets
 import matplotlib as mpl
 import numpy as np
@@ -13,14 +14,14 @@ import seaborn as sns
 from ipyfilechooser import FileChooser
 from IPython.display import HTML, display
 from plotly.subplots import make_subplots
-from pspipe_utils import best_fits, log, misc, pspipe_list
+from pspipe_utils import best_fits, misc, pspipe_list
 from pspy import pspy_utils, so_dict, so_spectra
 from voila.app import Voila
 
 import psinspect
 
 _psinspect_dict_file = "PSINSPECT_DICT_FILE"
-_psinspect_product_dur = "PSINSPECT_PRODUCT_DIR"
+_psinspect_product_dir = "PSINSPECT_PRODUCT_DIR"
 _psinspect_theme = "PSINSPECT_THEME"
 _psinspect_debug_flag = "PSINSPECT_DEBUG_FLAG"
 
@@ -97,10 +98,23 @@ class App:
                 + '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.2/css/fontawesome.min.css">'
             )
         )
-        self.log = log.get_logger(
-            debug=os.getenv(_psinspect_debug_flag) == "True" or debug,
-            fmt="%(asctime)s - %(levelname)s: %(message)s",
+
+        handler = colorlog.StreamHandler()
+        formatter = colorlog.ColoredFormatter(
+            "%(log_color)s%(asctime)s - %(levelname)s: %(message)s",
+            datefmt="%d-%b-%y %H:%M:%S",
+            log_colors={
+                "DEBUG": "cyan",
+                "INFO": "reset",
+                "WARNING": "red",
+                "ERROR": "bold_red",
+            },
         )
+        handler.setFormatter(formatter)
+
+        self.log = colorlog.getLogger("psinspect")
+        self.log.setLevel(colorlog.DEBUG if debug else colorlog.INFO)
+        self.log.addHandler(handler)
 
         # To avoid red background
         # https://stackoverflow.com/questions/25360714/avoid-red-background-color-for-logging-output-in-ipython-notebook
@@ -108,6 +122,8 @@ class App:
 
         if dict_file:
             os.environ[_psinspect_dict_file] = os.path.realpath(dict_file)
+        if product_dir:
+            os.environ[_psinspect_product_dir] = os.path.realpath(product_dir)
 
         self.registered_callback = list()
         self.updated_tab = set()
@@ -174,9 +190,19 @@ class App:
         )
         file_chooser.dir_icon = "/"
 
+        @logger.capture()
         def _load_dict(chooser):
             d.read_from_file(chooser.selected)
-            self._product_dir = chooser.selected_path
+            if (
+                product_dir := os.getenv(_psinspect_product_dir)
+            ) and product_dir != chooser.selected_path:
+                self.log.warning(
+                    "The dict file directory is different from the production directory ! "
+                    + "Use it at your own risk."
+                )
+                self._product_dir = product_dir
+            else:
+                self._product_dir = chooser.selected_path
             self.footer.selected_index = 0
             self.registered_callback.clear()
             self.updated_tab.clear()
@@ -478,7 +504,7 @@ class App:
     @logger.capture()
     def _update_windows(self):
         if not (directory := self.directory_exists("windows")):
-            self.log.debug("No windows directory")
+            self.log.info("No windows directory")
             return
 
         if self._add_tab(title="Window masks", callback=self._update_windows):
@@ -524,7 +550,7 @@ class App:
     @logger.capture()
     def _update_maps(self):
         if not (directory := self.directory_exists("plots/maps")):
-            self.log.debug("No plots/maps directory")
+            self.log.info("No plots/maps directory")
             return
 
         if self._add_tab(title="Maps", callback=self._update_maps):
@@ -566,7 +592,7 @@ class App:
                 kinds.value, surveys.value, modes.value, splits.value
             ):
                 if not os.path.exists(filename := png_files[kind, survey, split, mode]):
-                    self.log.debug(f"{filename} does not exist")
+                    self.log.warning(f"{filename} does not exist")
                     continue
                 with open(filename, "rb") as img:
                     img_widgets.children += (
@@ -586,7 +612,7 @@ class App:
     @logger.capture()
     def _update_spectra(self):
         if not (directory := self.directory_exists("spectra")):
-            self.log.debug("No spectra directory")
+            self.log.info("No spectra directory")
             return
 
         if self._add_tab(title="Spectra", callback=self._update_spectra):
@@ -723,7 +749,7 @@ class App:
     @logger.capture()
     def _update_mc_spectra(self):
         if not (directory := self.directory_exists("montecarlo")):
-            self.log.debug("No montecarlo directory")
+            self.log.info("No montecarlo directory")
             return
 
         if self._add_tab(title="MC Spectra", callback=self._update_mc_spectra):
@@ -945,7 +971,7 @@ class App:
     @logger.capture()
     def _update_best_fits(self, fetch_data=False):
         if not (directory := self.directory_exists("best_fits")):
-            self.log.debug("No best fits directory")
+            self.log.info("No best fits directory")
             return
 
         if self._add_tab(title="CMB & Foregrounds", callback=self._update_best_fits):
@@ -1110,7 +1136,7 @@ class App:
     @logger.capture()
     def _update_noise_model(self, fetch_data=False):
         if not (directory := self.directory_exists("noise_model")):
-            self.log.debug("No noise model directory")
+            self.log.info("No noise model directory")
             return
 
         if self._add_tab(title="Noise model", callback=self._update_noise_model):
