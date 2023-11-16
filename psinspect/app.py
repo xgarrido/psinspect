@@ -135,6 +135,7 @@ class App:
             self.app.children = children
 
         self._update_dict()
+        self._update_binning()
         self._update_passbands()
         self._update_beams()
         self._update_windows()
@@ -286,6 +287,99 @@ class App:
             return go.FigureWidget(fig)
 
     @logger.capture()
+    def _update_binning(self):
+        if self._add_tab(title="Binning", callback=self._update_binning):
+            return
+
+        if not os.path.exists(fn := d["binning_file"]):
+            self.log.debug(err_msg := "Binning information unreachable")
+            self._update_tab(html_err_msg(err_msg))
+
+        # Read binning file
+        low, high, center, size = pspy_utils.read_binning_file(fn, lmax=self.lmax)
+
+        # Get reference spectra
+        if directory := self.directory_exists("best_fits"):
+            ell, cmb = best_fits.cmb_dict_from_file(
+                os.path.join(directory, "cmb.dat"), lmax=self.lmax, spectra=self.spectra
+            )
+        else:
+            ell, cmb = pspy_utils.ps_from_params(d["cosmo_params"], d["type"], lmax=self.lmax)
+
+        modes = widgets.SelectMultiple(
+            description="Mode",
+            options=(mode_options := ["TT", "TE", "EE", "BB"]),
+            value=mode_options,
+        )
+
+        # Compute range of spectra for later use with vertical rectangle (plotly function add_hrect
+        # is to slow and does not allow hoverinfo)
+        color_list = sns.color_palette("rocket", n_colors=len(low)).as_hex()
+
+        def get_range(y, fcn):
+            yext = fcn(y)
+            if fcn == np.min:
+                return yext * (0.95 if yext > 0 else 1.05)
+            if fcn == np.max:
+                return yext * (1.05 if yext > 0 else 0.95)
+
+        yranges = {
+            spec: [get_range(cmb[spec], np.min), get_range(cmb[spec], np.max)]
+            for spec in mode_options
+        }
+
+        def _update(change=None):
+            layout = self.base_layout.copy()
+            fig = make_subplots(
+                rows=(nrows := len(modes.value)),
+                cols=1,
+                shared_xaxes=True,
+                x_title="$\ell$",
+                vertical_spacing=0.0,
+            )
+            fig.update_layout(**layout)
+
+            for i, mode in enumerate(modes.value):
+                rowcol_kwargs = dict(row=i + 1, col=1)
+                fig.add_scatter(
+                    name=mode,
+                    x=ell,
+                    y=cmb[mode],
+                    line_color="gray",
+                    showlegend=False,
+                    **rowcol_kwargs,
+                )
+
+                ymin, ymax = yranges[mode]
+                fig.update_yaxes(
+                    title_text="$D^{\mathrm{%s}}_\ell\;[\mu\mathrm{K}^2]$" % mode,
+                    range=[ymin, ymax],
+                    **rowcol_kwargs,
+                )
+                for j, (x0, x1) in enumerate(zip(low, high)):
+                    fig.add_scatter(
+                        name="",
+                        text=f"bin range [{x0}; {x1}]<br>"
+                        + f"bin center {center[j]}<br>"
+                        + f"bin size {size[j]}",
+                        hovertemplate="%{text}",
+                        x=[x0, x1, x1, x0],
+                        y=[ymin, ymin, ymax, ymax],
+                        mode="none",
+                        fill="toself",
+                        fillcolor=color_list[j],
+                        opacity=0.2,
+                        showlegend=False,
+                        **rowcol_kwargs,
+                    )
+
+            return self._refresh_figure(change, fig)
+
+        modes.observe(_update, names="value")
+
+        self._update_tab(widgets.VBox([modes, _update()]))
+
+    @logger.capture()
     def _update_passbands(self):
         if self._add_tab(title="Bandpass", callback=self._update_passbands):
             return
@@ -303,7 +397,8 @@ class App:
                 self._add_db_entry(key=(survey, _key), nu_ghz=nu_ghz, pb=pb)
 
         if not self._has_db_entry(_key, flatten=True):
-            self.log.debug("Passbands information unreachable")
+            self.log.error(err_msg := "Passbands information unreachable")
+            self._update_tab(html_err_msg(err_msg))
             return
 
         layout = self.base_layout.copy()
@@ -333,7 +428,8 @@ class App:
             self._add_db_entry(key=(survey, _key), ell=ell, bl=bl, idx=idx)
 
         if not self._has_db_entry(_key, flatten=True):
-            self.log.debug("Beams information unreachable")
+            self.log.error(err_msg := "Beams information unreachable")
+            self._update_tab(html_err_msg(err_msg))
             return
 
         base_widget = widgets.HBox(
