@@ -15,7 +15,7 @@ maintainers = [
 
 description = "Power spectra inspector for the SO LAT experiment"
 readme = "README.rst"
-license = { file = "LICENCE" }
+license = { file = "LICENSE" }
 keywords = ["visualisation", "pipeline", "cosmology"]
 classifiers = [
   "Development Status :: 5 - Production/Stable",
@@ -52,14 +52,6 @@ psinspect = "psinspect.app:run"
 
 [tool.setuptools.packages.find]
 exclude = ["docs", "tests"]
-
-[tool.versioneer]
-VCS = "git"
-style = "pep440"
-versionfile_source = "psinspect/_version.py"
-versionfile_build = "psinspect/_version.py"
-tag_prefix = "v"
-parentdir_prefix = "psinspect-"
 
 [project.urls]
 # Homepage = "https://psinspect.readthedocs.io"
