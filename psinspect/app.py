@@ -2,6 +2,7 @@ import logging
 import os
 import pickle
 import sys
+from copy import deepcopy
 from itertools import product
 from numbers import Number
 
@@ -773,13 +774,13 @@ class App:
         if self._add_tab(title="MC Spectra", callback=self._update_mc_spectra):
             return
 
-        _key = "mc spectra"
         if not self._has_db_entry("beam", flatten=True):
             self._update_beams(fetch_data=True)
         if not self._has_db_entry("noise", flatten=True):
             self._update_noise_model(fetch_data=True)
         if not self._has_db_entry("cmb_and_fg_dict", flatten=True):
             self._update_best_fits(fetch_data=True)
+
         for name, kind in product(self.cross_list, (kinds := ["cross", "auto", "noise"])):
             spectra = {}
             for spec in self.spectra:
@@ -787,7 +788,7 @@ class App:
                     os.path.join(directory, f"spectra_{spec}_{name}_{kind}.dat"), unpack=True
                 )
                 spectra[spec] = Bunch(mean=mean, std=std)
-            self._add_db_entry(key=(name, kind, _key), ell=ell, spectra=spectra)
+            self._add_db_entry(key=(name, kind, _key := "mc_spectra"), ell=ell, spectra=spectra)
 
             if (bestfit_dir := self.directory_exists("best_fits")) and os.path.exists(
                 fn := os.path.join(bestfit_dir, f"model_{name}_{kind}.dat")
@@ -806,29 +807,21 @@ class App:
 
                 sv1, sv2 = name1.split("_")[0], name2.split("_")[0]
                 if sv1 == sv2:
-                    ar1 = name1.replace(f"{sv1}_", "")
-                    ar2 = name2.replace(f"{sv2}_", "")
-                    lb, nlth = so_spectra.read_ps(
-                        os.path.join(
-                            self._product_dir, "noise_model", f"mean_{ar1}x{ar2}_{sv1}_noise.dat"
-                        ),
-                        spectra=self.spectra,
-                    )
-                    # nlth = self._get_db_entry(key=(name, "noise", "interpolate")).nl
+                    nlth = deepcopy(self._get_db_entry(key=(name, "noise", "interpolate")).nl)
                     for spec in self.spectra:
                         X, Y = spec
-                        # nlth[spec] /= bl1.bl[X][bl1.idx] * bl2.bl[Y][bl2.idx]
-                        nlth[spec] /= bl1.bl[X] * bl2.bl[Y]
+                        nlth[spec] /= bl1.bl[X][bl1.idx] * bl2.bl[Y][bl2.idx]
+
                 else:
                     nlth = {spec: np.zeros(self.lmax) for spec in self.spectra}
                 if kind == "noise":
                     self._add_db_entry(key=(name, kind, "model"), ell=meta.ell, spectra=nlth)
-                # if kind == "auto":
-                #     spectra = {
-                #         spec: meta.cmb_and_fg[spec] + nlth[spec] * d[f"n_splits_{sv1}"]
-                #         for spec in self.spectra
-                #     }
-                #     self._add_db_entry(key=(name, kind, "model"), ell=meta.ell, spectra=spectra)
+                if kind == "auto":
+                    spectra = {
+                        spec: meta.cmb_and_fg[spec] + nlth[spec] * d[f"n_splits_{sv1}"]
+                        for spec in self.spectra
+                    }
+                    self._add_db_entry(key=(name, kind, "model"), ell=meta.ell, spectra=spectra)
 
         base_widget = widgets.HBox(
             [
