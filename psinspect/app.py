@@ -88,13 +88,19 @@ class App:
         self.base_layout = dict(
             height=800,
             template=os.getenv(_psinspect_theme, "plotly_white"),
+            paper_bgcolor="rgba(0,0,0,0)",
+            plot_bgcolor="rgba(0,0,0,0)",
+            modebar=dict(bgcolor="rgba(0, 0, 0, 0)", color="gray", activecolor="gray"),
             legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
         )
-        # This is to fix loading of mathjax that is not correctly done and make the application totally
-        # bugging see https://github.com/microsoft/vscode-jupyter/issues/8131#issuecomment-1589961116
         display(
             HTML(
-                '<script type="text/javascript" async src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-MML-AM_SVG"></script>'
+                # Remove plotly icon
+                '<style>[class="modebar-btn plotlyjsicon modebar-btn--logo"] {display:none;}</style>'
+                # This is to fix loading of mathjax that is not correctly done and make the application totally
+                # bugging see https://github.com/microsoft/vscode-jupyter/issues/8131#issuecomment-1589961116
+                + '<script type="text/javascript" async src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-MML-AM_SVG"></script>'
+                # We also add font awesome support
                 + '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.2/css/fontawesome.min.css">'
             )
         )
@@ -648,7 +654,7 @@ class App:
         )
 
         layout = self.base_layout.copy()
-        layout.update(dict(height=1000))
+        layout.update(height=1000)
 
         @logger.capture()
         def _update(change=None):
@@ -875,7 +881,7 @@ class App:
                 horizontal_spacing=0.05 / nsurvey,
             )
             layout = self.base_layout.copy()
-            layout.update(dict(height=1000))
+            layout.update(height=1000)
             fig.update_layout(**layout)
 
             for i, name in enumerate(crosses.value):
@@ -1046,7 +1052,7 @@ class App:
                 horizontal_spacing=0.05 / nsurvey,
             )
             layout = self.base_layout.copy()
-            layout.update(dict(height=1000))
+            layout.update(height=1000)
             fig.update_layout(**layout)
 
             for i, name in enumerate(crosses.value):
