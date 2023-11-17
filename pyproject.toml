@@ -54,8 +54,8 @@ psinspect = "psinspect.app:run"
 exclude = ["docs", "tests"]
 
 [project.urls]
-# Homepage = "https://psinspect.readthedocs.io"
-# Documentation = "https://psinspect.readthedocs.io"
+Homepage = "https://github.com/xgarrido/psinspect"
+Documentation = "https://psinspect.readthedocs.io"
 Source = "https://github.com/xgarrido/psinspect"
 Tracker = "https://github.com/xgarrido/psinspect/issues"
 Licensing = "https://github.com/xgarrido/psinspect/blob/master/LICENCE"
