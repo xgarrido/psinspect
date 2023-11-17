@@ -27,9 +27,11 @@ calculations through `PSpipe <https://github.com/simonsobs/PSpipe>`_.
 Installing
 ----------
 
+The easiest way is to get the PyPI version with
+
 .. code:: shell
 
-    pip install git+https://github.com/xgarrido/psinspect.git [--user]
+    pip install psinspect [--user]
 
 You can test if everything has been properly installed with
 
