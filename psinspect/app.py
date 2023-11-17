@@ -522,8 +522,8 @@ class App:
 
     @logger.capture()
     def _update_windows(self):
-        if not (directory := self.directory_exists("windows")):
-            self.log.info("No windows directory")
+        if not (directory := self.directory_exists(name := "windows")):
+            self.log.info(f"No {name} directory")
             return
 
         if self._add_tab(title="Window masks", callback=self._update_windows):
@@ -568,8 +568,8 @@ class App:
 
     @logger.capture()
     def _update_maps(self):
-        if not (directory := self.directory_exists("plots/maps")):
-            self.log.info("No plots/maps directory")
+        if not (directory := self.directory_exists(name := "plots/maps")):
+            self.log.info(f"No {name} directory")
             return
 
         if self._add_tab(title="Maps", callback=self._update_maps):
@@ -630,8 +630,8 @@ class App:
 
     @logger.capture()
     def _update_spectra(self):
-        if not (directory := self.directory_exists("spectra")):
-            self.log.info("No spectra directory")
+        if not (directory := self.directory_exists(name := "spectra")):
+            self.log.info(f"No {name} directory")
             return
 
         if self._add_tab(title="Spectra", callback=self._update_spectra):
@@ -767,8 +767,8 @@ class App:
 
     @logger.capture()
     def _update_best_fits(self, fetch_data=False):
-        if not (directory := self.directory_exists("best_fits")):
-            self.log.info("No best fits directory")
+        if not (directory := self.directory_exists(name := "best_fits")):
+            self.log.info(f"No {name} directory")
             return
 
         if self._add_tab(title="CMB & Foregrounds", callback=self._update_best_fits):
@@ -932,8 +932,8 @@ class App:
 
     @logger.capture()
     def _update_noise_model(self, fetch_data=False):
-        if not (directory := self.directory_exists("noise_model")):
-            self.log.info("No noise model directory")
+        if not (directory := self.directory_exists(name := "noise_model")):
+            self.log.info(f"No {name} directory")
             return
 
         if self._add_tab(title="Noise model", callback=self._update_noise_model):
@@ -1040,8 +1040,8 @@ class App:
 
     @logger.capture()
     def _update_mc_spectra(self):
-        if not (directory := self.directory_exists("montecarlo")):
-            self.log.info("No montecarlo directory")
+        if not (directory := self.directory_exists(name := "montecarlo")):
+            self.log.info(f"No {name} directory")
             return
 
         if self._add_tab(title="MC Spectra", callback=self._update_mc_spectra):
