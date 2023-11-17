@@ -766,220 +766,6 @@ class App:
         self.log.info(f"Directory '{directory}' loaded")
 
     @logger.capture()
-    def _update_mc_spectra(self):
-        if not (directory := self.directory_exists("montecarlo")):
-            self.log.info("No montecarlo directory")
-            return
-
-        if self._add_tab(title="MC Spectra", callback=self._update_mc_spectra):
-            return
-
-        if not self._has_db_entry("beam", flatten=True):
-            self._update_beams(fetch_data=True)
-        if not self._has_db_entry("noise", flatten=True):
-            self._update_noise_model(fetch_data=True)
-        if not self._has_db_entry("cmb_and_fg_dict", flatten=True):
-            self._update_best_fits(fetch_data=True)
-
-        for name, kind in product(self.cross_list, (kinds := ["cross", "auto", "noise"])):
-            spectra = {}
-            for spec in self.spectra:
-                ell, mean, std = np.loadtxt(
-                    os.path.join(directory, f"spectra_{spec}_{name}_{kind}.dat"), unpack=True
-                )
-                spectra[spec] = Bunch(mean=mean, std=std)
-            self._add_db_entry(key=(name, kind, _key := "mc_spectra"), ell=ell, spectra=spectra)
-
-            if (bestfit_dir := self.directory_exists("best_fits")) and os.path.exists(
-                fn := os.path.join(bestfit_dir, f"model_{name}_{kind}.dat")
-            ):
-                ell, spectra = so_spectra.read_ps(fn, spectra=self.spectra)
-                self._add_db_entry(key=(name, kind, "binned model"), ell=ell, spectra=spectra)
-
-            meta = self._get_db_entry(key=(name, "cmb_and_fg"))
-            if kind == "cross":
-                self._add_db_entry(key=(name, kind, "model"), ell=meta.ell, spectra=meta.cmb_and_fg)
-
-            if kind in ["noise", "auto"]:
-                name1, name2 = name.split("x")
-                bl1 = self._get_db_entry(key=(name1, "beam"))
-                bl2 = self._get_db_entry(key=(name2, "beam"))
-
-                sv1, sv2 = name1.split("_")[0], name2.split("_")[0]
-                if sv1 == sv2:
-                    nlth = deepcopy(self._get_db_entry(key=(name, "noise", "interpolate")).nl)
-                    for spec in self.spectra:
-                        X, Y = spec
-                        nlth[spec] /= bl1.bl[X][bl1.idx] * bl2.bl[Y][bl2.idx]
-
-                else:
-                    nlth = {spec: np.zeros(self.lmax) for spec in self.spectra}
-                if kind == "noise":
-                    self._add_db_entry(key=(name, kind, "model"), ell=meta.ell, spectra=nlth)
-                if kind == "auto":
-                    spectra = {
-                        spec: meta.cmb_and_fg[spec] + nlth[spec] * d[f"n_splits_{sv1}"]
-                        for spec in self.spectra
-                    }
-                    self._add_db_entry(key=(name, kind, "model"), ell=meta.ell, spectra=spectra)
-
-        base_widget = widgets.HBox(
-            [
-                plots := widgets.ToggleButtons(
-                    # description="Plot",
-                    options=["spectra", "residuals", "σ residuals"],
-                    button_style="info",  # 'success', 'info', 'warning', 'danger' or ''
-                    tooltips=[
-                        "Plot absolute spectra",
-                        "Plot residuals",
-                        "Plot residuals in units of σ",
-                    ],
-                ),
-                spectrum := widgets.Dropdown(
-                    description="Spectrum", options=self.spectra, value=self.spectra[0]
-                ),
-                crosses := widgets.SelectMultiple(
-                    description="Cross", options=self.cross_list, value=self.cross_list
-                ),
-                kinds := widgets.SelectMultiple(description="Kind", options=kinds, value=["cross"]),
-            ]
-        )
-
-        @logger.capture()
-        def _update(change=None):
-            mode = spectrum.value
-            surveys = set(sum([cross.split("x") for cross in crosses.value], []))
-            nsurvey = min(len(surveys), len(crosses.value))
-            subplot_titles = np.full((nsurvey, nsurvey), None)
-            indices = np.triu_indices(nsurvey)[::-1]
-            for i, name in enumerate(crosses.value):
-                irow, icol = indices[0][i], indices[1][i]
-                subplot_titles[irow, icol] = name
-                if mode[0] != mode[1] and nsurvey > 1:
-                    subplot_titles[icol, irow] = "{1}x{0}".format(*name.split("x"))
-
-            nsims = d["iStop"] - d["iStart"] + 1
-            self.log.debug(f"nsims={nsims}")
-
-            # ell factors for residuals
-            ell_fac = {spec: -0.8 for spec in self.spectra}
-            ell_fac.update({"TT": 1.0, "TE": 0.0, "ET": 0.0})
-
-            y_title = r"D_\ell\;[\mu\mathrm{K}^2]"
-            if plots.value == "residuals":
-                if ell_fac[mode] == 1.0:
-                    y_title = r"\ell\Delta " + y_title
-                elif ell_fac[mode] != 0.0:
-                    y_title = rf"\ell^{{{ell_fac[mode]:.1f}}}" + y_title
-            if plots.value == "σ residuals":
-                y_title = "\Delta D_\ell\;[\sigma]"
-
-            fig = make_subplots(
-                rows=nsurvey,
-                cols=nsurvey,
-                shared_xaxes="all",
-                shared_yaxes="all",
-                subplot_titles=subplot_titles.flatten().tolist(),
-                x_title="$\ell$",
-                y_title=f"${y_title}$",
-                vertical_spacing=0.15 / nsurvey,
-                horizontal_spacing=0.05 / nsurvey,
-            )
-            layout = self.base_layout.copy()
-            layout.update(height=1000)
-            fig.update_layout(**layout)
-
-            for i, name in enumerate(crosses.value):
-                name1, name2 = name.split("x")
-                rowcol_kwargs = dict(row=indices[0][i] + 1, col=indices[1][i] + 1)
-                inverse_rowcol_kwargs = dict(row=indices[1][i] + 1, col=indices[0][i] + 1)
-                fill_upper = mode[0] != mode[1] and name1 != name2 and nsurvey > 1
-                marker_symbol = {"cross": "circle", "auto": "square", "noise": "diamond"}
-                for kind in kinds.value:
-                    kind_kwargs = dict(
-                        name=kind,
-                        mode="markers",
-                        marker_color=self.colors[name],
-                        marker_symbol=marker_symbol[kind],
-                        legendgroup=kind,
-                    )
-
-                    meta_sim = self._get_db_entry(key=(name, kind, _key))
-                    meta_model = self._get_db_entry(key=(name, kind, "model"))
-                    meta_binned_model = self._get_db_entry(key=(name, kind, "binned model"))
-
-                    if plots.value == "spectra":
-                        ell = meta_sim.ell
-                        get_sim_values = lambda mode: meta_sim.spectra[mode].mean
-                        get_sim_errors = lambda mode: meta_sim.spectra[mode].std
-                    if plots.value == "residuals":
-                        ell = meta_sim.ell
-                        get_sim_values = (
-                            lambda mode: (
-                                meta_sim.spectra[mode].mean - meta_binned_model.spectra[mode]
-                            )
-                            * ell ** ell_fac[mode]
-                        )
-                        get_sim_errors = (
-                            lambda mode: meta_sim.spectra[mode].std
-                            / np.sqrt(nsims)
-                            * ell ** ell_fac[mode]
-                        )
-                    if plots.value == "σ residuals":
-                        ell = meta_sim.ell
-                        get_sim_values = lambda mode: (
-                            (meta_sim.spectra[mode].mean - meta_binned_model.spectra[mode])
-                            / meta_sim.spectra[mode].std
-                            / np.sqrt(nsims)
-                        )
-                        get_sim_errors = lambda mode: None
-
-                    # Simulation
-                    get_kwargs = lambda mode, showlegend: dict(
-                        x=ell,
-                        y=get_sim_values(mode),
-                        error_y=dict(type="data", array=get_sim_errors(mode)),
-                        showlegend=showlegend,
-                        **kind_kwargs,
-                    )
-
-                    fig.add_scatter(**get_kwargs(mode, i == 0), **rowcol_kwargs)
-                    if fill_upper:
-                        fig.add_scatter(**get_kwargs(mode[::-1], False), **inverse_rowcol_kwargs)
-
-                    # Model
-                    if plots.value == "spectra":
-                        model_kwargs = dict(
-                            name="model",
-                            x=meta_model.ell,
-                            y=meta_model.spectra[mode],
-                            line_color="gray",
-                            showlegend=i == 0,
-                            legendgroup="model",
-                            legendrank=1,
-                        )
-                        fig.add_scatter(**model_kwargs, **rowcol_kwargs)
-                        if fill_upper:
-                            fig.add_scatter(**model_kwargs, **inverse_rowcol_kwargs)
-
-                yaxes_kwargs = dict(type="linear")
-                if plots.value == "spectra":
-                    yaxes_kwargs = dict(type="log" if mode == "TT" else "linear")
-                fig.update_yaxes(**yaxes_kwargs, **rowcol_kwargs)
-                if fill_upper:
-                    fig.update_yaxes(**yaxes_kwargs, **inverse_rowcol_kwargs)
-
-            return self._refresh_figure(change, fig)
-
-        plots.observe(_update, names="value")
-        spectrum.observe(_update, names="value")
-        crosses.observe(_update, names="value")
-        kinds.observe(_update, names="value")
-
-        self._update_tab(widgets.VBox([base_widget, _update()]))
-        self.log.info(f"Directory '{directory}' loaded")
-
-    @logger.capture()
     def _update_best_fits(self, fetch_data=False):
         if not (directory := self.directory_exists("best_fits")):
             self.log.info("No best fits directory")
@@ -1250,6 +1036,220 @@ class App:
 
         if not fetch_data:
             self._update_tab(widgets.VBox([base_widget, _update()]))
+        self.log.info(f"Directory '{directory}' loaded")
+
+    @logger.capture()
+    def _update_mc_spectra(self):
+        if not (directory := self.directory_exists("montecarlo")):
+            self.log.info("No montecarlo directory")
+            return
+
+        if self._add_tab(title="MC Spectra", callback=self._update_mc_spectra):
+            return
+
+        if not self._has_db_entry("beam", flatten=True):
+            self._update_beams(fetch_data=True)
+        if not self._has_db_entry("noise", flatten=True):
+            self._update_noise_model(fetch_data=True)
+        if not self._has_db_entry("cmb_and_fg_dict", flatten=True):
+            self._update_best_fits(fetch_data=True)
+
+        for name, kind in product(self.cross_list, (kinds := ["cross", "auto", "noise"])):
+            spectra = {}
+            for spec in self.spectra:
+                ell, mean, std = np.loadtxt(
+                    os.path.join(directory, f"spectra_{spec}_{name}_{kind}.dat"), unpack=True
+                )
+                spectra[spec] = Bunch(mean=mean, std=std)
+            self._add_db_entry(key=(name, kind, _key := "mc_spectra"), ell=ell, spectra=spectra)
+
+            if (bestfit_dir := self.directory_exists("best_fits")) and os.path.exists(
+                fn := os.path.join(bestfit_dir, f"model_{name}_{kind}.dat")
+            ):
+                ell, spectra = so_spectra.read_ps(fn, spectra=self.spectra)
+                self._add_db_entry(key=(name, kind, "binned model"), ell=ell, spectra=spectra)
+
+            meta = self._get_db_entry(key=(name, "cmb_and_fg"))
+            if kind == "cross":
+                self._add_db_entry(key=(name, kind, "model"), ell=meta.ell, spectra=meta.cmb_and_fg)
+
+            if kind in ["noise", "auto"]:
+                name1, name2 = name.split("x")
+                bl1 = self._get_db_entry(key=(name1, "beam"))
+                bl2 = self._get_db_entry(key=(name2, "beam"))
+
+                sv1, sv2 = name1.split("_")[0], name2.split("_")[0]
+                if sv1 == sv2:
+                    nlth = deepcopy(self._get_db_entry(key=(name, "noise", "interpolate")).nl)
+                    for spec in self.spectra:
+                        X, Y = spec
+                        nlth[spec] /= bl1.bl[X][bl1.idx] * bl2.bl[Y][bl2.idx]
+
+                else:
+                    nlth = {spec: np.zeros(self.lmax) for spec in self.spectra}
+                if kind == "noise":
+                    self._add_db_entry(key=(name, kind, "model"), ell=meta.ell, spectra=nlth)
+                if kind == "auto":
+                    spectra = {
+                        spec: meta.cmb_and_fg[spec] + nlth[spec] * d[f"n_splits_{sv1}"]
+                        for spec in self.spectra
+                    }
+                    self._add_db_entry(key=(name, kind, "model"), ell=meta.ell, spectra=spectra)
+
+        base_widget = widgets.HBox(
+            [
+                plots := widgets.ToggleButtons(
+                    # description="Plot",
+                    options=["spectra", "residuals", "σ residuals"],
+                    button_style="info",  # 'success', 'info', 'warning', 'danger' or ''
+                    tooltips=[
+                        "Plot absolute spectra",
+                        "Plot residuals",
+                        "Plot residuals in units of σ",
+                    ],
+                ),
+                spectrum := widgets.Dropdown(
+                    description="Spectrum", options=self.spectra, value=self.spectra[0]
+                ),
+                crosses := widgets.SelectMultiple(
+                    description="Cross", options=self.cross_list, value=self.cross_list
+                ),
+                kinds := widgets.SelectMultiple(description="Kind", options=kinds, value=["cross"]),
+            ]
+        )
+
+        @logger.capture()
+        def _update(change=None):
+            mode = spectrum.value
+            surveys = set(sum([cross.split("x") for cross in crosses.value], []))
+            nsurvey = min(len(surveys), len(crosses.value))
+            subplot_titles = np.full((nsurvey, nsurvey), None)
+            indices = np.triu_indices(nsurvey)[::-1]
+            for i, name in enumerate(crosses.value):
+                irow, icol = indices[0][i], indices[1][i]
+                subplot_titles[irow, icol] = name
+                if mode[0] != mode[1] and nsurvey > 1:
+                    subplot_titles[icol, irow] = "{1}x{0}".format(*name.split("x"))
+
+            nsims = d["iStop"] - d["iStart"] + 1
+            self.log.debug(f"nsims={nsims}")
+
+            # ell factors for residuals
+            ell_fac = {spec: -0.8 for spec in self.spectra}
+            ell_fac.update({"TT": 1.0, "TE": 0.0, "ET": 0.0})
+
+            y_title = r"D_\ell\;[\mu\mathrm{K}^2]"
+            if plots.value == "residuals":
+                if ell_fac[mode] == 1.0:
+                    y_title = r"\ell\Delta " + y_title
+                elif ell_fac[mode] != 0.0:
+                    y_title = rf"\ell^{{{ell_fac[mode]:.1f}}}" + y_title
+            if plots.value == "σ residuals":
+                y_title = "\Delta D_\ell\;[\sigma]"
+
+            fig = make_subplots(
+                rows=nsurvey,
+                cols=nsurvey,
+                shared_xaxes="all",
+                shared_yaxes="all",
+                subplot_titles=subplot_titles.flatten().tolist(),
+                x_title="$\ell$",
+                y_title=f"${y_title}$",
+                vertical_spacing=0.15 / nsurvey,
+                horizontal_spacing=0.05 / nsurvey,
+            )
+            layout = self.base_layout.copy()
+            layout.update(height=1000)
+            fig.update_layout(**layout)
+
+            for i, name in enumerate(crosses.value):
+                name1, name2 = name.split("x")
+                rowcol_kwargs = dict(row=indices[0][i] + 1, col=indices[1][i] + 1)
+                inverse_rowcol_kwargs = dict(row=indices[1][i] + 1, col=indices[0][i] + 1)
+                fill_upper = mode[0] != mode[1] and name1 != name2 and nsurvey > 1
+                marker_symbol = {"cross": "circle", "auto": "square", "noise": "diamond"}
+                for kind in kinds.value:
+                    kind_kwargs = dict(
+                        name=kind,
+                        mode="markers",
+                        marker_color=self.colors[name],
+                        marker_symbol=marker_symbol[kind],
+                        legendgroup=kind,
+                    )
+
+                    meta_sim = self._get_db_entry(key=(name, kind, _key))
+                    meta_model = self._get_db_entry(key=(name, kind, "model"))
+                    meta_binned_model = self._get_db_entry(key=(name, kind, "binned model"))
+
+                    if plots.value == "spectra":
+                        ell = meta_sim.ell
+                        get_sim_values = lambda mode: meta_sim.spectra[mode].mean
+                        get_sim_errors = lambda mode: meta_sim.spectra[mode].std
+                    if plots.value == "residuals":
+                        ell = meta_sim.ell
+                        get_sim_values = (
+                            lambda mode: (
+                                meta_sim.spectra[mode].mean - meta_binned_model.spectra[mode]
+                            )
+                            * ell ** ell_fac[mode]
+                        )
+                        get_sim_errors = (
+                            lambda mode: meta_sim.spectra[mode].std
+                            / np.sqrt(nsims)
+                            * ell ** ell_fac[mode]
+                        )
+                    if plots.value == "σ residuals":
+                        ell = meta_sim.ell
+                        get_sim_values = lambda mode: (
+                            (meta_sim.spectra[mode].mean - meta_binned_model.spectra[mode])
+                            / meta_sim.spectra[mode].std
+                            / np.sqrt(nsims)
+                        )
+                        get_sim_errors = lambda mode: None
+
+                    # Simulation
+                    get_kwargs = lambda mode, showlegend: dict(
+                        x=ell,
+                        y=get_sim_values(mode),
+                        error_y=dict(type="data", array=get_sim_errors(mode)),
+                        showlegend=showlegend,
+                        **kind_kwargs,
+                    )
+
+                    fig.add_scatter(**get_kwargs(mode, i == 0), **rowcol_kwargs)
+                    if fill_upper:
+                        fig.add_scatter(**get_kwargs(mode[::-1], False), **inverse_rowcol_kwargs)
+
+                    # Model
+                    if plots.value == "spectra":
+                        model_kwargs = dict(
+                            name="model",
+                            x=meta_model.ell,
+                            y=meta_model.spectra[mode],
+                            line_color="gray",
+                            showlegend=i == 0,
+                            legendgroup="model",
+                            legendrank=1,
+                        )
+                        fig.add_scatter(**model_kwargs, **rowcol_kwargs)
+                        if fill_upper:
+                            fig.add_scatter(**model_kwargs, **inverse_rowcol_kwargs)
+
+                yaxes_kwargs = dict(type="linear")
+                if plots.value == "spectra":
+                    yaxes_kwargs = dict(type="log" if mode == "TT" else "linear")
+                fig.update_yaxes(**yaxes_kwargs, **rowcol_kwargs)
+                if fill_upper:
+                    fig.update_yaxes(**yaxes_kwargs, **inverse_rowcol_kwargs)
+
+            return self._refresh_figure(change, fig)
+
+        plots.observe(_update, names="value")
+        spectrum.observe(_update, names="value")
+        crosses.observe(_update, names="value")
+        kinds.observe(_update, names="value")
+
+        self._update_tab(widgets.VBox([base_widget, _update()]))
         self.log.info(f"Directory '{directory}' loaded")
 
 
