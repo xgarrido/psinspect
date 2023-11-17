@@ -1,24 +1,28 @@
-=========
-psinspect
-=========
-.. inclusion-marker-do-not-remove
+.. image:: https://raw.githubusercontent.com/FortAwesome/Font-Awesome/6.x/svgs/solid/user-secret.svg
+  :target: https://github.com/xgarrido/psinspect
+  :width: 110
+  :height: 110
+  :align: left 
 
 ``psinspect`` is a visual application to check for CMB power spectra and covariance matrices
 calculations through `PSpipe <https://github.com/simonsobs/PSpipe>`_.
 
 .. image:: https://img.shields.io/pypi/v/psinspect.svg?style=flat
    :target: https://pypi.python.org/pypi/psinspect/
-.. image:: https://img.shields.io/badge/license-BSD-yellow
-   :target: https://github.com/xgarrido/psinspect/blob/master/LICENSE
 .. image:: https://img.shields.io/github/actions/workflow/status/xgarrido/psinspect/testing.yml?branch=main
    :target: https://github.com/xgarrido/psinspect/actions?query=workflow%3ATesting
 .. image:: https://codecov.io/gh/xgarrido/psinspect/branch/main/graph/badge.svg?token=HHAJ7NQ5CE
    :target: https://codecov.io/gh/xgarrido/psinspect
+.. image:: https://img.shields.io/badge/license-BSD-yellow
+   :target: https://github.com/xgarrido/psinspect/blob/master/LICENSE
+
 ..
    .. image:: https://readthedocs.org/projects/pspy/badge/?version=latest
       :target: https://pspy.readthedocs.io/en/latest/?badge=latest
    .. image:: https://mybinder.org/badge_logo.svg
       :target: https://mybinder.org/v2/gh/simonsobs/pspy/master?filepath=notebooks/%2Findex.ipynb
+
+|
 
 Installing
 ----------
