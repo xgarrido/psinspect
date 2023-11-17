@@ -85,6 +85,18 @@ class App:
     """An ipywidgets and plotly application for checking PSpipe productions"""
 
     def initialize(self, dict_file=None, product_dir=None, debug=False):
+        """Initialization function for the application
+
+        Parameters
+        ----------
+        dict_file : str
+          The path to the dict file (default: None)
+        product_dir : str
+          The location of the production dir (default: None).
+          If not provided, the program looks in the dict_file directory.
+        debug: bool
+          A debug flag
+        """
         self.base_layout = dict(
             height=800,
             template=os.getenv(_psinspect_theme, "plotly_white"),
