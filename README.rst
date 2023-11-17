@@ -6,9 +6,8 @@ psinspect
 ``psinspect`` is a visual application to check for CMB power spectra and covariance matrices
 calculations through `PSpipe <https://github.com/simonsobs/PSpipe>`_.
 
-..
-   .. image:: https://img.shields.io/pypi/v/pspy.svg?style=flat
-      :target: https://pypi.python.org/pypi/pspy/
+.. image:: https://img.shields.io/pypi/v/psinspect.svg?style=flat
+   :target: https://pypi.python.org/pypi/psinspect/
 .. image:: https://img.shields.io/badge/license-BSD-yellow
    :target: https://github.com/xgarrido/psinspect/blob/master/LICENSE
 .. image:: https://img.shields.io/github/actions/workflow/status/xgarrido/psinspect/testing.yml?branch=main
@@ -20,13 +19,6 @@ calculations through `PSpipe <https://github.com/simonsobs/PSpipe>`_.
       :target: https://pspy.readthedocs.io/en/latest/?badge=latest
    .. image:: https://mybinder.org/badge_logo.svg
       :target: https://mybinder.org/v2/gh/simonsobs/pspy/master?filepath=notebooks/%2Findex.ipynb
-
-* Free software: BSD license
-..
-   * ``pspy`` documentation: https://pspy.readthedocs.io.
-   * Scientific documentation: https://pspy.readthedocs.io/en/latest/scientific_doc.pdf
-
-
 
 Installing
 ----------
