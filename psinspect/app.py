@@ -132,7 +132,9 @@ class App:
         handler.setFormatter(formatter)
 
         self.log = colorlog.getLogger("psinspect")
-        self.log.setLevel(colorlog.DEBUG if debug else colorlog.INFO)
+        self.log.setLevel(
+            colorlog.DEBUG if os.getenv(_psinspect_debug_flag) == "True" or debug else colorlog.INFO
+        )
         self.log.addHandler(handler)
 
         # To avoid red background
