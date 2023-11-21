@@ -41,6 +41,13 @@ dependencies = [
   "voila",
 ]
 
+[project.urls]
+Homepage = "https://github.com/xgarrido/psinspect"
+Documentation = "https://psinspect.readthedocs.io"
+Source = "https://github.com/xgarrido/psinspect"
+Tracker = "https://github.com/xgarrido/psinspect/issues"
+Licensing = "https://github.com/xgarrido/psinspect/blob/master/LICENCE"
+
 [tool.setuptools_scm]
 version_file = "psinspect/_version.py"
 
@@ -53,9 +60,8 @@ psinspect = "psinspect.app:run"
 [tool.setuptools.packages.find]
 exclude = ["docs", "tests"]
 
-[project.urls]
-Homepage = "https://github.com/xgarrido/psinspect"
-Documentation = "https://psinspect.readthedocs.io"
-Source = "https://github.com/xgarrido/psinspect"
-Tracker = "https://github.com/xgarrido/psinspect/issues"
-Licensing = "https://github.com/xgarrido/psinspect/blob/master/LICENCE"
+[tool.black]
+line-length = 100
+
+[tool.isort]
+profile = "black"
