@@ -365,7 +365,7 @@ class App:
                     value=mode_options,
                 ),
                 palettes := widgets.Dropdown(
-                    description="Palette", options=list(mpl.colormaps.keys()), value="rocket"
+                    description="Palette", options=sorted(mpl.colormaps.keys()), value="rocket"
                 ),
             ]
         )
