@@ -668,7 +668,7 @@ class App:
                     description="Cross", options=self.cross_list, value=self.cross_list
                 ),
                 kinds := widgets.SelectMultiple(description="Kind", options=kinds, value=["cross"]),
-                splits := widgets.SelectMultiple(description="Split", options=splits),
+                splits := widgets.SelectMultiple(description="Split", options=[None] + splits),
             ]
         )
 
@@ -1174,7 +1174,7 @@ class App:
                 inverse_rowcol_kwargs = dict(row=indices[1][i] + 1, col=indices[0][i] + 1)
                 fill_upper = mode[0] != mode[1] and name1 != name2 and nsurvey > 1
                 marker_symbols = {"cross": "circle", "auto": "square", "noise": "diamond"}
-                for kind in kinds.value:
+                for j, kind in enumerate(kinds.value):
                     kind_kwargs = dict(
                         name=kind,
                         mode="markers",
@@ -1233,7 +1233,7 @@ class App:
                             x=meta_model.ell,
                             y=meta_model.spectra[mode],
                             line_color="gray",
-                            showlegend=i == 0,
+                            showlegend=i == j == 0,
                             legendgroup="model",
                             legendrank=1,
                         )
