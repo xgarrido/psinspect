@@ -2,7 +2,7 @@
   :target: https://github.com/xgarrido/psinspect
   :width: 110
   :height: 110
-  :align: left 
+  :align: left
 
 ``psinspect`` is a visual application to check for CMB power spectra and covariance matrices
 calculations through `PSpipe <https://github.com/simonsobs/PSpipe>`_.
@@ -13,6 +13,9 @@ calculations through `PSpipe <https://github.com/simonsobs/PSpipe>`_.
    :target: https://github.com/xgarrido/psinspect/actions?query=workflow%3ATesting
 .. image:: https://codecov.io/gh/xgarrido/psinspect/branch/main/graph/badge.svg?token=HHAJ7NQ5CE
    :target: https://codecov.io/gh/xgarrido/psinspect
+.. image:: https://results.pre-commit.ci/badge/github/xgarrido/psinspect/main.svg
+   :target: https://results.pre-commit.ci/latest/github/xgarrido/psinspect/main
+   :alt: pre-commit.ci status
 .. image:: https://img.shields.io/badge/license-BSD-yellow
    :target: https://github.com/xgarrido/psinspect/blob/master/LICENSE
 
