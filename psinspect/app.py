@@ -1259,7 +1259,7 @@ class App:
         self.log.info(f"Directory '{directory}' loaded")
 
     @logger.capture()
-    def _update_covariances(self):
+    def _update_covariances(self, fetch_data=False):
         if not (directory := self.directory_exists(name := "covariances")):
             self.log.info(f"No {name} directory")
             return
@@ -1341,6 +1341,12 @@ class App:
                         )
                         if can_compute_ratio
                         else Empty(),
+                        show_full_cov := widgets.Checkbox(
+                            value=False,
+                            description="Show whole cov. diagonal",
+                            disabled=False,
+                            indent=True,
+                        ),
                     ]
                 ),
             ]
@@ -1352,193 +1358,296 @@ class App:
 
         @logger.capture()
         def _update(change=None):
-            mode = spectrum.value
-            selected_arrays = surveys.value
-            excluded_arrays = list(set(self.survey_list) - set(selected_arrays))
-            nsurvey = len(selected_arrays) * (len(selected_arrays) + 1) // 2
-            cross_names = ["{}x{}".format(*cross) for cross in cwr(selected_arrays, r=2)]
+            if plots.value == "diagonals" and show_full_cov.value:
+                for w in [spectrum, surveys, kinds, diagonals]:
+                    setattr(w, "disabled", True)
 
-            y_title = "$\ell$"
-            if plots.value == "diagonals":
-                y_title = "MC cov./analytic cov." if show_ratio.value else "covariance/correlation"
-
-            fig = make_subplots(
-                rows=nsurvey,
-                cols=nsurvey,
-                shared_xaxes="all",
-                shared_yaxes="all" if plots.value == "matrix" or shared_yaxes.value else False,
-                x_title="$\ell$",
-                y_title=y_title,
-                vertical_spacing=0.05 / nsurvey,
-                horizontal_spacing=0.05 / nsurvey,
-            )
-            layout = self.base_layout.copy()
-            layout.update(
-                height=(height := 300 * nsurvey if nsurvey > 1 else 800),
-                width=height if plots.value == "matrix" else None,
-                coloraxis={"colorscale": colorscale},
-            )
-            fig.update_layout(**layout)
-
-            # Getting covariance indices to kept
-            indices = covariance.get_indices(
-                binning.low,
-                binning.high,
-                spec_name_list=self.cross_list,
-                spectra_order=self.spectra,
-                spectra_cuts={
-                    ar: dict(T=ell_range.value, P=ell_range.value) for ar in selected_arrays
-                },
-                selected_spectra=[mode],
-                selected_arrays=selected_arrays,
-                excluded_arrays=excluded_arrays,
-            )
-            self.log.debug(f"indices size = {indices.size}")
-            ell_indices = (binning.low > ell_range.value[0]) & (binning.high < ell_range.value[1])
-            ell_x, ell_y = np.meshgrid(binning.center[ell_indices], binning.center[ell_indices])
-            ell_x, ell_y = ell_x.flatten(), ell_y.flatten()
-
-            count = 0
-            for ix, iy in product(range(nsurvey), repeat=2):
-                rowcol_kwargs = dict(row=nsurvey - ix, col=iy + 1)
-                annotations_kwargs = dict(
-                    xref="paper",
-                    yref="paper",
-                    showarrow=False,
-                    font=dict(size=max(17 - nsurvey, 8)),
+                layout = self.base_layout.copy()
+                layout.update(
+                    dragmode="pan",
+                    xaxis=dict(showticklabels=False),
+                    # xaxis=dict(title="", rangeslider=dict(visible=True)),
                 )
-                if nsurvey > 1:
-                    if ix == nsurvey - 1:
-                        fig.add_annotation(
-                            x=(iy + 0.5) / nsurvey,
-                            y=1.0,
-                            text=cross_names[iy],
-                            xanchor="center",
-                            yanchor="bottom",
-                            **annotations_kwargs,
-                        )
-                    if iy == nsurvey - 1:
-                        fig.add_annotation(
-                            x=1.0,
-                            y=(ix + 0.5) / nsurvey,
-                            text=cross_names[ix],
-                            xanchor="right",
-                            yanchor="middle",
-                            textangle=90,
-                            **annotations_kwargs,
+                fig = go.Figure(layout=layout)
+
+                colors = sns.color_palette(palette, n_colors=len(spectrum.options)).as_hex()
+                colors = {spec: colors[i] for i, spec in enumerate(spectrum.options)}
+                cov_kwargs = {
+                    "analytic": dict(mode="lines", line=dict(dash="solid"), opacity=1.0),
+                    "mc": dict(mode="lines", line=dict(dash="solid", width=4), opacity=0.5),
+                }
+                # Fake plot for legends
+                if not show_ratio.value:
+                    for i, kind in enumerate(available_cov):
+                        fig.add_scatter(
+                            name=kind,
+                            x=[None],
+                            y=[None],
+                            legendrank=i,
+                            line_color="gray",
+                            **cov_kwargs[kind],
                         )
 
-                # Take care of ET, BT and BE already done in TE, TB and EB
-                if mode in ["ET", "BT", "BE"]:
-                    if nsurvey == 1:
-                        self.log.warning(f"No covariance for {mode}! Check {mode[::-1]}.")
+                show_legends = set()
+                ibin = 0
+                for cross, mode in product(self.cross_list, self.spectra):
+                    name1, name2 = cross.split("x")
+                    if mode in ["ET", "BT", "BE"] and name1 == name2:
                         continue
-                    if ix != iy:
-                        continue
-                    name1, name2 = cross_names[ix].split("x")
-                    if name1 == name2:
-                        continue
-                    ix = iy = count
-                    count += 1
-
-                idx, idy = (
-                    indices[ix * nbins : (ix + 1) * nbins],
-                    indices[iy * nbins : (iy + 1) * nbins],
-                )
-                corrs = {
-                    kind: self._get_db_entry(key=("cov", kind)).corr[np.ix_(idx, idy)]
-                    for kind in kinds.options
-                }
-                covs = {
-                    kind: self._get_db_entry(key=("cov", kind)).cov[np.ix_(idx, idy)]
-                    for kind in kinds.options
-                }
-                if plots.value == "matrix":
-                    diagonals.disabled = True
-                    shared_yaxes.disabled = True
-                    show_ratio.disabled = can_compute_ratio
-                    kinds.disabled = False
-
-                    corr = corrs[kinds.value].flatten()
+                    x = ibin + np.arange(nbins)
                     scatter_kwargs = dict(
-                        name=kinds.value,
-                        x=ell_x,
-                        y=ell_y,
-                        showlegend=False,
-                        text=[f"r = {r}" for r in corr],
-                        mode="markers",
-                        marker=dict(
-                            color=corr,
-                            sizemode="area",
-                            size=100 * np.abs(corr),
-                            sizeref=0.1,
-                            # sizemin=4,
-                            showscale=True,
-                            coloraxis="coloraxis",
-                            cmin=-1,
-                            cmid=0,
-                            cmax=+1,
-                        ),
+                        name=f"{mode}",
+                        text=[
+                            f"{cross}<br>"
+                            + f"bin range [{binning.low[i]}; {binning.high[i]}]<br>"
+                            + f"bin center {binning.center[i]}<br>"
+                            for i in range(nbins)
+                        ],
+                        x=x,
+                        hoverlabel=dict(namelength=-1),
+                        hoverinfo="text",
+                        line_color=colors[mode],
+                        legendgroup=mode,
                     )
-                    fig.add_scatter(**scatter_kwargs, **rowcol_kwargs)
-                    axes_kwargs = dict(range=ell_range.value, **rowcol_kwargs)
-                    fig.update_xaxes(**axes_kwargs)
-                    fig.update_yaxes(**axes_kwargs)
 
-                if plots.value == "diagonals":
-                    diagonals.disabled = False
-                    shared_yaxes.disabled = nsurvey == 1
-                    show_ratio.disabled = False
-                    kinds.disabled = True
-
-                    diags = [k for k in range(-kmax, kmax) if abs(k) in diagonals.value]
-                    for k in diags:
-                        x = binning.center[: -abs(k) if k else None]
-                        scatter_kwargs = dict(
-                            name=f"{k}-diagonal",
-                            x=x[ell_indices[: -abs(k) if k else None]],
-                            mode="lines",
-                            legendgroup=abs(k),
-                            showlegend=ix == 0 and iy == 0,
-                            line_color=color_list[abs(k)],
-                            line_dash="dash" if k < 0 else "solid",
-                            **rowcol_kwargs,
+                    if show_ratio.value:
+                        cov_ana = self._get_db_entry(key=("cov", "analytic")).cov
+                        cov_mc = self._get_db_entry(key=("cov", "mc")).cov
+                        y = cov_mc.diagonal() / cov_ana.diagonal()
+                        fig.add_scatter(
+                            y=y[x], showlegend=mode not in show_legends, **scatter_kwargs
                         )
+                        show_legends.add(mode)
+                    else:
+                        for kind in available_cov:
+                            cov = self._get_db_entry(key=("cov", kind)).cov
+                            y = cov.diagonal()
+                            fig.add_scatter(
+                                y=y[x],
+                                showlegend=mode not in show_legends,
+                                **scatter_kwargs,
+                                **cov_kwargs[kind],
+                            )
+                            show_legends.add(mode)
+                    ibin += nbins
+                fig.update_yaxes(
+                    title="MC/analytic correlation ratio"
+                    if show_ratio.value
+                    else "covariances diagonal",
+                    type="linear" if show_ratio.value else "log",
+                    range=[0.8, 1.6] if show_ratio.value else None,
+                )
 
-                        if show_ratio.value:
-                            if ix == iy:
-                                y = np.diag(covs["mc"] / covs["analytic"], k=k)
+            else:
+                for w in [spectrum, surveys, kinds, diagonals]:
+                    setattr(w, "disabled", False)
+                mode = spectrum.value
+                selected_arrays = surveys.value
+                excluded_arrays = list(set(self.survey_list) - set(selected_arrays))
+                nsurvey = len(selected_arrays) * (len(selected_arrays) + 1) // 2
+                cross_names = ["{}x{}".format(*cross) for cross in cwr(selected_arrays, r=2)]
+
+                y_title = "$\ell$"
+                if plots.value == "diagonals":
+                    y_title = (
+                        "MC/analytic correlation ratio"
+                        if show_ratio.value
+                        else "covariance/correlation"
+                    )
+
+                fig = make_subplots(
+                    rows=nsurvey,
+                    cols=nsurvey,
+                    shared_xaxes="all",
+                    shared_yaxes="all" if plots.value == "matrix" or shared_yaxes.value else False,
+                    x_title="$\ell$",
+                    y_title=y_title,
+                    vertical_spacing=0.05 / nsurvey,
+                    horizontal_spacing=0.05 / nsurvey,
+                )
+                layout = self.base_layout.copy()
+                layout.update(
+                    height=(height := 300 * nsurvey if nsurvey > 1 else 800),
+                    width=height if plots.value == "matrix" else None,
+                    coloraxis={"colorscale": colorscale},
+                )
+                fig.update_layout(**layout)
+
+                # Getting covariance indices to kept
+                indices = covariance.get_indices(
+                    binning.low,
+                    binning.high,
+                    spec_name_list=self.cross_list,
+                    spectra_order=self.spectra,
+                    spectra_cuts={
+                        ar: dict(T=ell_range.value, P=ell_range.value) for ar in selected_arrays
+                    },
+                    selected_spectra=[mode],
+                    selected_arrays=selected_arrays,
+                    excluded_arrays=excluded_arrays,
+                )
+                self.log.debug(f"indices size = {indices.size}")
+                ell_indices = (binning.low > ell_range.value[0]) & (
+                    binning.high < ell_range.value[1]
+                )
+                ell_x, ell_y = np.meshgrid(binning.center[ell_indices], binning.center[ell_indices])
+                ell_x, ell_y = ell_x.flatten(), ell_y.flatten()
+
+                count = 0
+                for ix, iy in product(range(nsurvey), repeat=2):
+                    rowcol_kwargs = dict(row=nsurvey - ix, col=iy + 1)
+                    annotations_kwargs = dict(
+                        xref="paper",
+                        yref="paper",
+                        showarrow=False,
+                        font=dict(size=max(17 - nsurvey, 8)),
+                    )
+                    if nsurvey > 1:
+                        if ix == nsurvey - 1:
+                            fig.add_annotation(
+                                x=(iy + 0.5) / nsurvey,
+                                y=1.0,
+                                text=cross_names[iy],
+                                xanchor="center",
+                                yanchor="bottom",
+                                **annotations_kwargs,
+                            )
+                        if iy == nsurvey - 1:
+                            fig.add_annotation(
+                                x=1.0,
+                                y=(ix + 0.5) / nsurvey,
+                                text=cross_names[ix],
+                                xanchor="right",
+                                yanchor="middle",
+                                textangle=90,
+                                **annotations_kwargs,
+                            )
+
+                    # Take care of ET, BT and BE already done in TE, TB and EB
+                    if mode in ["ET", "BT", "BE"]:
+                        if nsurvey == 1:
+                            self.log.warning(f"No covariance for {mode}! Check {mode[::-1]}.")
+                            continue
+                        if ix != iy:
+                            continue
+                        name1, name2 = cross_names[ix].split("x")
+                        if name1 == name2:
+                            continue
+                        ix = iy = count
+                        count += 1
+
+                    idx, idy = (
+                        indices[ix * nbins : (ix + 1) * nbins],
+                        indices[iy * nbins : (iy + 1) * nbins],
+                    )
+                    corrs = {
+                        kind: self._get_db_entry(key=("cov", kind)).corr[np.ix_(idx, idy)]
+                        for kind in kinds.options
+                    }
+                    covs = {
+                        kind: self._get_db_entry(key=("cov", kind)).cov[np.ix_(idx, idy)]
+                        for kind in kinds.options
+                    }
+                    if plots.value == "matrix":
+                        diagonals.disabled = shared_yaxes.disabled = show_full_cov.disabled = True
+                        show_ratio.disabled = can_compute_ratio
+                        kinds.disabled = False
+
+                        corr = corrs[kinds.value].flatten()
+                        mask = np.abs(corr) > 1e-2
+                        self.log.debug(f"fraction of matrix hidden = {1-mask.sum()/corr.size}")
+                        corr = corr[mask]
+                        scatter_kwargs = dict(
+                            name=kinds.value,
+                            x=ell_x[mask],
+                            y=ell_y[mask],
+                            showlegend=False,
+                            text=[f"r = {r}" for r in corr],
+                            mode="markers",
+                            marker=dict(
+                                color=corr,
+                                sizemode="area",
+                                size=100 * np.abs(corr),
+                                sizeref=0.1,
+                                # sizemin=4,
+                                showscale=True,
+                                coloraxis="coloraxis",
+                                cmin=-1,
+                                cmid=0,
+                                cmax=+1,
+                            ),
+                        )
+                        fig.add_scatter(**scatter_kwargs, **rowcol_kwargs)
+                        axes_kwargs = dict(range=ell_range.value, **rowcol_kwargs)
+                        fig.update_xaxes(**axes_kwargs)
+                        fig.update_yaxes(**axes_kwargs)
+
+                    if plots.value == "diagonals":
+                        diagonals.disabled = show_ratio.disabled = show_full_cov.disabled = False
+                        shared_yaxes.disabled = nsurvey == 1
+                        kinds.disabled = True
+
+                        diags = [k for k in range(-kmax, kmax) if abs(k) in diagonals.value]
+                        for k in diags:
+                            x = binning.center[: -abs(k) if k else None]
+                            scatter_kwargs = dict(
+                                name=f"{k}-diagonal",
+                                x=x[ell_indices[: -abs(k) if k else None]],
+                                mode="lines",
+                                legendgroup=abs(k),
+                                showlegend=ix == 0 and iy == 0,
+                                line_color=color_list[abs(k)],
+                                line_dash="dash" if k < 0 else "solid",
+                                **rowcol_kwargs,
+                            )
+
+                            if show_ratio.value:
+                                if k == 0 and ix == iy:
+                                    y = np.diag(covs["mc"] / covs["analytic"], k=k)
+                                else:
+                                    with np.errstate(divide="ignore", invalid="ignore"):
+                                        y = np.diag(corrs["mc"] / corrs["analytic"], k=k)
+                                fig.add_scatter(y=y, **scatter_kwargs)
+                                fig.add_hline(1.0, line_color="gray", **rowcol_kwargs)
                             else:
-                                y = np.diag(corrs["mc"] / corrs["analytic"], k=k)
-                            fig.add_scatter(y=y, **scatter_kwargs)
-                            fig.add_hline(1.0, line_color="gray", **rowcol_kwargs)
-                        else:
-                            matrices = covs if ix == iy else corrs
-                            marker_symbols = {"mc": "circle", "analytic": "square"}
-                            opacities = {"mc": 1.0, "analytic": 0.5}
-                            for name, matrix in matrices.items():
-                                scatter_kwargs.update(
-                                    name=f"{k}-diagonal - {name}",
-                                    mode="lines",
-                                    # marker_symbol=marker_symbols[name],
-                                    opacity=opacities[name],
-                                )
-                                fig.add_scatter(y=np.diag(matrix, k=k), **scatter_kwargs)
-                        # yaxes_kwargs = dict(range=[0.7, 1.3], **rowcol_kwargs)
-                        # fig.update_yaxes(**yaxes_kwargs)
-                        # fig.update_xaxes(range=[0, 5000])
-            return self._refresh_figure(change, fig)
+                                matrices = covs if k == 0 and ix == iy else corrs
+                                marker_symbols = {"mc": "circle", "analytic": "square"}
+                                opacities = {"mc": 1.0, "analytic": 0.5}
+                                for name, matrix in matrices.items():
+                                    scatter_kwargs.update(
+                                        name=f"{k}-diagonal - {name}",
+                                        mode="lines",
+                                        # marker_symbol=marker_symbols[name],
+                                        opacity=opacities[name],
+                                    )
+                                    fig.add_scatter(y=np.diag(matrix, k=k), **scatter_kwargs)
+                            # yaxes_kwargs = dict(range=[0.7, 1.3], **rowcol_kwargs)
+                            # fig.update_yaxes(**yaxes_kwargs)
+                            # fig.update_xaxes(range=[0, 5000])
+            return self._refresh_figure(
+                change,
+                fig,
+                config=dict(scrollZoom=True)
+                if plots.value == "diagonals" and show_full_cov.value
+                else None,
+            )
 
-        kinds.observe(_update, names="value")
-        plots.observe(_update, names="value")
-        spectrum.observe(_update, names="value")
-        surveys.observe(_update, names="value")
-        diagonals.observe(_update, names="value")
-        shared_yaxes.observe(_update, names="value")
-        show_ratio.observe(_update, names="value")
+        for w in [
+            kinds,
+            plots,
+            spectrum,
+            surveys,
+            diagonals,
+            shared_yaxes,
+            show_ratio,
+            show_full_cov,
+        ]:
+            w.observe(_update, names="value")
         # ell_range.observe(_update, names="value")
 
-        self._update_tab(widgets.VBox([base_widget, _update()]))
+        if not fetch_data:
+            self._update_tab(widgets.VBox([base_widget, _update()]))
+
         self.log.info(f"Directory '{directory}' loaded")
 
 
@@ -1592,7 +1701,6 @@ def run(args=None):
         os.environ[_psinspect_product_dir] = os.path.realpath(product_dir)
     os.environ[_psinspect_theme] = "plotly_white" if arguments.theme == "light" else "plotly_dark"
     os.environ[_psinspect_debug_flag] = str(arguments.debug)
-
     # create a voila instance
     app = Voila()
 
