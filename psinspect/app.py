@@ -647,6 +647,13 @@ class App:
         if self._add_tab(title="Spectra", callback=self._update_spectra):
             return
 
+        # Let's retrieve covariances if any
+        if not self._has_db_entry("cov", flatten=True):
+            self._update_covariances(fetch_data=True)
+        available_cov = [keys[-1] for keys in self.db.keys() if "cov" in keys]
+        if available_cov and not self._has_db_entry("binning"):
+            self._update_binning(fetch_data=True)
+
         for name in self.cross_list:
             cl_type = d["type"]
             for kind in (kinds := ["cross", "auto", "noise"]):
@@ -663,6 +670,31 @@ class App:
                     ell, spectra = so_spectra.read_ps(fn, spectra=self.spectra)
                     self._add_db_entry(key=(name, split), ell=ell, spectra=spectra)
 
+            # Let's add errors if any
+            if not available_cov:
+                continue
+            errors = {}
+            for cov_name in ["analytic", "mc"]:
+                if cov_name not in available_cov:
+                    continue
+                binning = self._get_db_entry("binning")
+                meta = self._get_db_entry(key=("cov", cov_name))
+                for mode in self.spectra:
+                    indices = covariance.get_indices(
+                        binning.low,
+                        binning.high,
+                        spec_name_list=self.cross_list,
+                        spectra_order=self.spectra,
+                        selected_spectra=[mode],
+                        selected_arrays=(selected_arrays := name.split("x")),
+                        excluded_arrays=list(set(self.survey_list) - set(selected_arrays)),
+                    )
+                    if len(indices) != (nbin := len(binning.center)):
+                        indices = indices[nbin : 2 * nbin]
+                    cov = meta.cov[np.ix_(indices, indices)]
+                    errors[cov_name, mode] = np.sqrt(np.diag(cov))
+            self._add_db_entry(key=(name, "cross"), errors=errors)
+
         base_widget = widgets.HBox(
             [
                 spectrum := widgets.Dropdown(
@@ -672,7 +704,12 @@ class App:
                     description="Cross", options=self.cross_list, value=self.cross_list
                 ),
                 kinds := widgets.SelectMultiple(description="Kind", options=kinds, value=["cross"]),
-                splits := widgets.SelectMultiple(description="Split", options=[None] + splits),
+                splits := widgets.SelectMultiple(description="Split", options=["–"] + splits),
+                errors := widgets.SelectMultiple(
+                    description="Errors", options=["–"] + available_cov
+                )
+                if available_cov
+                else Empty(),
             ]
         )
 
@@ -756,6 +793,26 @@ class App:
                                 **inverse_rowcol_kwargs,
                             )
 
+                for err in errors.value:
+                    marker_symbols = {"analytic": "circle", "mc": "square"}
+                    if (meta := self._get_db_entry(key=(name, "cross"))) and (
+                        error := meta.errors.get((err, mode))
+                    ) is not None:
+                        scatter_kwargs = dict(
+                            name=err,
+                            x=meta.ell,
+                            y=meta.spectra[mode],
+                            error_y=dict(type="data", array=error),
+                            mode="markers",
+                            marker_color=self.colors[name],
+                            marker_symbol=marker_symbols[err],
+                            showlegend=i == 0,
+                            legendgroup="cross",
+                        )
+                        fig.add_scatter(**scatter_kwargs, **rowcol_kwargs)
+                        if fill_upper:
+                            fig.add_scatter(**scatter_kwargs, **inverse_rowcol_kwargs)
+
                 yaxes_kwargs = dict(
                     type="log" if mode == "TT" else "linear",
                     range=[-1, 4] if mode == "TT" else None,
@@ -771,6 +828,7 @@ class App:
         crosses.observe(_update, names="value")
         kinds.observe(_update, names="value")
         splits.observe(_update, names="value")
+        errors.observe(_update, names="value")
 
         self._update_tab(widgets.VBox([base_widget, _update()]))
         self.log.info(f"Directory '{directory}' loaded")
