@@ -109,11 +109,11 @@ class App:
         )
         display(
             HTML(
-                # Remove plotly icon
-                '<style>[class="modebar-btn plotlyjsicon modebar-btn--logo"] {display:none;}</style>'
+                # # Remove plotly icon
+                # '<style>[class="modebar-btn plotlyjsicon modebar-btn--logo"] {display:none;}</style>'
                 # This is to fix loading of mathjax that is not correctly done and make the application totally
                 # bugging see https://github.com/microsoft/vscode-jupyter/issues/8131#issuecomment-1589961116
-                + '<script type="text/javascript" async src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-MML-AM_SVG"></script>'
+                '<script type="text/javascript" async src="https://cdnjs.cloudflare.com/ajax/libs/mathjax/2.7.1/MathJax.js?config=TeX-MML-AM_SVG"></script>'
                 # We also add font awesome support
                 + '<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.2/css/fontawesome.min.css">'
             )
@@ -327,14 +327,18 @@ class App:
     def directory_exists(self, dirname):
         return None if not os.path.exists(d := os.path.join(self._product_dir, dirname)) else d
 
-    def _refresh_figure(self, change, fig):
+    def _refresh_figure(self, change, fig, config=None):
+        default_config = {"displaylogo": False}
+        default_config |= config or {}
+        fig = go.FigureWidget(fig)
+        fig._config = fig._config | default_config
         if change:
             tab = self.tab.children[self.tab.selected_index]
             children = list(tab.children)
-            children[-1] = go.FigureWidget(fig)
+            children[-1] = fig
             tab.children = children
         else:
-            return go.FigureWidget(fig)
+            return fig
 
     @logger.capture()
     def _update_binning(self, fetch_data=False):
