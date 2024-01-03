@@ -375,7 +375,7 @@ class App:
         )
 
         # Compute range of spectra for later use with vertical rectangle (plotly function add_hrect
-        # is to slow and does not allow hoverinfo)
+        # is too slow and does not allow hoverinfo)
         def get_range(y, fcn):
             yext = fcn(y)
             if fcn == np.min:
@@ -389,14 +389,14 @@ class App:
         }
 
         def _update(change=None):
-            layout = self.base_layout.copy()
             fig = make_subplots(
                 rows=(nrows := len(modes.value)),
                 cols=1,
                 shared_xaxes=True,
-                x_title="$\ell$",
+                x_title=r"$\ell$",
                 vertical_spacing=0.0,
             )
+            layout = self.base_layout.copy()
             fig.update_layout(**layout)
 
             color_list = sns.color_palette(palettes.value, n_colors=len(low)).as_hex()
@@ -414,7 +414,7 @@ class App:
 
                 ymin, ymax = yranges[mode]
                 fig.update_yaxes(
-                    title_text="$D^{\mathrm{%s}}_\ell\;[\mu\mathrm{K}^2]$" % mode,
+                    title_text=r"$D^{\mathrm{%s}}_\ell\;[\mu\mathrm{K}^2]$" % mode,
                     range=[ymin, ymax],
                     **rowcol_kwargs,
                 )
@@ -511,7 +511,7 @@ class App:
 
         def _update(change=None):
             layout = self.base_layout.copy()
-            layout.update(dict(xaxis_title="$\ell$", yaxis_title="normalized beam"))
+            layout.update(dict(xaxis_title=r"$\ell$", yaxis_title="normalized beam"))
             fig = go.Figure(layout=layout)
             for survey, mode in product(surveys.value, modes.value):
                 if meta := self._get_db_entry((survey, "beam")):
@@ -735,8 +735,8 @@ class App:
                 shared_xaxes="all",
                 shared_yaxes="all",
                 subplot_titles=subplot_titles.flatten().tolist(),
-                x_title="$\ell$",
-                y_title="$D_\ell\;[\mu\mathrm{K}^2]$",
+                x_title=r"$\ell$",
+                y_title=r"$D_\ell\;[\mu\mathrm{K}^2]$",
                 vertical_spacing=0.15 / nsurvey,
                 horizontal_spacing=0.05 / nsurvey,
             )
@@ -905,8 +905,8 @@ class App:
                 shared_xaxes="all",
                 shared_yaxes="all",
                 subplot_titles=subplot_titles.flatten().tolist(),
-                x_title="$\ell$",
-                y_title="$D_\ell\;[\mu\mathrm{K}^2]$",
+                x_title=r"$\ell$",
+                y_title=r"$D_\ell\;[\mu\mathrm{K}^2]$",
                 vertical_spacing=0.15 / nsurvey,
                 horizontal_spacing=0.05 / nsurvey,
             )
@@ -1074,7 +1074,7 @@ class App:
             ]
         )
         layout = self.base_layout.copy()
-        layout.update(dict(xaxis_title="$\ell$", yaxis_title="noise level [µK²]"))
+        layout.update(dict(xaxis_title=r"$\ell$", yaxis_title="noise level [µK²]"))
 
         def _update(change=None):
             fig = go.Figure(layout=layout)
@@ -1213,7 +1213,7 @@ class App:
                 elif ell_fac[mode] != 0.0:
                     y_title = rf"\ell^{{{ell_fac[mode]:.1f}}}" + y_title
             if plots.value == "σ residuals":
-                y_title = "\Delta D_\ell\;[\sigma]"
+                y_title = r"\Delta D_\ell\;[\sigma]"
 
             fig = make_subplots(
                 rows=nsurvey,
@@ -1221,7 +1221,7 @@ class App:
                 shared_xaxes="all",
                 shared_yaxes="all",
                 subplot_titles=subplot_titles.flatten().tolist(),
-                x_title="$\ell$",
+                x_title=r"$\ell$",
                 y_title=f"${y_title}$",
                 vertical_spacing=0.15 / nsurvey,
                 horizontal_spacing=0.05 / nsurvey,
@@ -1452,7 +1452,7 @@ class App:
 
                 show_legends = set()
                 ibin = 0
-                for cross, mode in product(self.cross_list, self.spectra):
+                for mode, cross in product(self.spectra, self.cross_list):
                     name1, name2 = cross.split("x")
                     if mode in ["ET", "BT", "BE"] and name1 == name2:
                         continue
@@ -1509,7 +1509,7 @@ class App:
                 nsurvey = len(selected_arrays) * (len(selected_arrays) + 1) // 2
                 cross_names = ["{}x{}".format(*cross) for cross in cwr(selected_arrays, r=2)]
 
-                y_title = "$\ell$"
+                y_title = r"$\ell$"
                 if plots.value == "diagonals":
                     y_title = (
                         "MC/analytic correlation ratio"
@@ -1522,7 +1522,7 @@ class App:
                     cols=nsurvey,
                     shared_xaxes="all",
                     shared_yaxes="all" if plots.value == "matrix" or shared_yaxes.value else False,
-                    x_title="$\ell$",
+                    x_title=r"$\ell$",
                     y_title=y_title,
                     vertical_spacing=0.05 / nsurvey,
                     horizontal_spacing=0.05 / nsurvey,
