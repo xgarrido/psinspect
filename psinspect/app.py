@@ -705,11 +705,11 @@ class App:
                 ),
                 kinds := widgets.SelectMultiple(description="Kind", options=kinds, value=["cross"]),
                 splits := widgets.SelectMultiple(description="Split", options=["–"] + splits),
-                errors := widgets.SelectMultiple(
-                    description="Errors", options=["–"] + available_cov
-                )
-                if available_cov
-                else Empty(),
+                errors := (
+                    widgets.SelectMultiple(description="Errors", options=["–"] + available_cov)
+                    if available_cov
+                    else Empty()
+                ),
             ]
         )
 
@@ -1395,14 +1395,16 @@ class App:
                         shared_yaxes := widgets.Checkbox(
                             value=False, description="Share same y-axes", indent=True
                         ),
-                        show_ratio := widgets.Checkbox(
-                            value=False,
-                            description="Show MC/analytic ratio",
-                            disabled=False,
-                            indent=True,
-                        )
-                        if can_compute_ratio
-                        else Empty(),
+                        show_ratio := (
+                            widgets.Checkbox(
+                                value=False,
+                                description="Show MC/analytic ratio",
+                                disabled=False,
+                                indent=True,
+                            )
+                            if can_compute_ratio
+                            else Empty()
+                        ),
                         show_full_cov := widgets.Checkbox(
                             value=False,
                             description="Show whole cov. diagonal",
@@ -1493,9 +1495,11 @@ class App:
                             show_legends.add(mode)
                     ibin += nbins
                 fig.update_yaxes(
-                    title="MC/analytic correlation ratio"
-                    if show_ratio.value
-                    else "covariances diagonal",
+                    title=(
+                        "MC/analytic correlation ratio"
+                        if show_ratio.value
+                        else "covariances diagonal"
+                    ),
                     type="linear" if show_ratio.value else "log",
                     range=[0.8, 1.6] if show_ratio.value else None,
                 )
@@ -1689,9 +1693,11 @@ class App:
             return self._refresh_figure(
                 change,
                 fig,
-                config=dict(scrollZoom=True)
-                if plots.value == "diagonals" and show_full_cov.value
-                else None,
+                config=(
+                    dict(scrollZoom=True)
+                    if plots.value == "diagonals" and show_full_cov.value
+                    else None
+                ),
             )
 
         for w in [
