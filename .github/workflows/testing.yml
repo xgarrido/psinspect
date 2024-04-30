@@ -32,6 +32,10 @@ jobs:
         python -m pip install --upgrade pip wheel
         python -m pip install numpy pytest pytest-cov
         python -m pip install -e .
+      env:
+        CC: gcc
+        CXX: g++
+        FC: gfortran
 
     - name: Unit tests
       run: |
