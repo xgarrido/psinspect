@@ -72,7 +72,7 @@ commands
    from psinspect import App
    my_app = App()
    my_app.initialize()
-   my_app.start()
+   my_app.run()
 
 Another (smarter) way is to encapsulate the whole installation stuff within a ``python`` virtual
 env. to avoid conflicts with your existing installation. To do so you can follow these command lines
