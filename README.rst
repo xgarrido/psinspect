@@ -82,7 +82,6 @@ env. to avoid conflicts with your existing installation. To do so you can follow
    module load python
    python -m venv /where/to/install/your/env
    source /where/to/install/your/env/bin/activate
-   python -m pip install ipykernel
    python -m ipykernel install --user --name=psinspect
 
 This will install a new kernel named ``psinspect`` that you can choose when you will create a new
