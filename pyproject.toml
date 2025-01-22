@@ -40,6 +40,9 @@ dependencies = [
   "voila",
 ]
 
+[project.optional-dependencies]
+test = ["pytest", "pytest-cov"]
+
 [project.urls]
 Homepage = "https://github.com/xgarrido/psinspect"
 Documentation = "https://psinspect.readthedocs.io"
