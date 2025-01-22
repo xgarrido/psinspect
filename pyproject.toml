@@ -35,7 +35,7 @@ dependencies = [
   "pspipe_utils",
   "jupyterlab",
   "ipyfilechooser",
-  "plotly",
+  "plotly==5.23.0",
   "seaborn",
   "voila",
 ]
