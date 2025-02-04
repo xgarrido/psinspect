@@ -31,7 +31,7 @@ jobs:
       run: |
         python -m pip install --upgrade pip
         python -m pip install .[test]
-        
+
     - name: Unit tests
       run: |
         pytest -vv psinspect --cov=psinspect --cov-report=xml:coverage.xml
