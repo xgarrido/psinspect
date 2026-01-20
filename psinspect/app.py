@@ -74,13 +74,11 @@ banner = """
 
 # Generate HTML widget with error msg inside
 def html_err_msg(err_msg):
-    return widgets.HTML(
-        f"""<center>
+    return widgets.HTML(f"""<center>
         <p><b><font size="+2" color="red">
         <i class="fa-solid fa-link-slash fa-bounce"></i> {err_msg}
         </font></b></p>
-        </center>"""
-    )
+        </center>""")
 
 
 class App:
